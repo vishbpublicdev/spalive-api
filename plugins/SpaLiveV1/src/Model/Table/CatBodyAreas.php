@@ -1,0 +1,16 @@
+<?php
+namespace SpaLiveV1\Model\Table;
+
+use Cake\ORM\Table;
+use Cake\Utility\Hash;
+use Cake\Validation\Validator;
+
+class CatBodyAreasTable extends Table
+{
+    public function initialize(array $config) : void
+    {
+        $this->setTable('cat_body_areas'); // Name of the table in the database, if absent convention assumes lowercase version of file prefix
+        $this->addBehavior('SpaLiveV1.My');
+    }
+
+}

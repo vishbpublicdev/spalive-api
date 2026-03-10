@@ -2,7 +2,10 @@
 
 /vendor/*
 /config/app.php
+/config/app_local.example.php
+/config/app_local.php
 
+/tmp
 /tmp/cache/models/*
 !/tmp/cache/models/empty
 /tmp/cache/persistent/*
@@ -13,13 +16,36 @@
 !/tmp/sessions/empty
 /tmp/tests/*
 !/tmp/tests/empty
+/tmp/assets/*
+!/tmp/assets/empty
+/tmp/chunks/*
+!/tmp/chunks/empty
+.vscode/
 
 /logs/*
 !/logs/empty
+/logs/*.log
 
 # CakePHP 2
 
+/tmp/*
 /app/tmp/*
 /app/Config/core.php
 /app/Config/database.php
 /vendors/*
+
+/config/.env
+
+*.css.map
+*.DS_Store
+.DS_Store
+/.DS_Store
+/src/.DS_Store
+/tmp/reports/*
+
+/webroot/files/*
+
+/.idea
+
+/.env
+composer.phar

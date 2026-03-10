@@ -1,0 +1,1 @@
+ALTER TABLE `data_subscription_cancelled` ADD `reason` TEXT NOT NULL AFTER `modified`; 
