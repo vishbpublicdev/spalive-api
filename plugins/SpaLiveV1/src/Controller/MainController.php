@@ -32323,6 +32323,32 @@ class MainController extends AppPluginController {
         $html2pdf->Output('monthly_statement.pdf', 'I');
     }
 
+    /**
+     * Repair malformed HTML for HTML2PDF - closes unclosed tags, fixes structure
+     */
+    private function _repairHtmlForPdf($html) {
+        if (empty($html)) {
+            return $html;
+        }
+        try {
+            $dom = new \DOMDocument();
+            libxml_use_internal_errors(true);
+            $dom->loadHTML('<?xml encoding="UTF-8"><div id="pdf-content">' . $html . '</div>', LIBXML_HTML_NODEFDTD);
+            libxml_clear_errors();
+            $node = $dom->getElementById('pdf-content');
+            if ($node) {
+                $inner = '';
+                foreach ($node->childNodes as $child) {
+                    $inner .= $dom->saveHTML($child);
+                }
+                return $inner ?: $html;
+            }
+        } catch (\Exception $e) {
+            $this->log('_repairHtmlForPdf error: ' . $e->getMessage(), 'error');
+        }
+        return $html;
+    }
+
     public function print_agreement() {
 
         $panel = get('l3n4p', '');
@@ -32385,10 +32411,18 @@ class MainController extends AppPluginController {
         $content = '';
         if ($ent) {
             $ent_user = $this->SysUsers->find()->where(['SysUsers.id' => $ent->user_id, 'SysUsers.deleted' => 0])->first();
+            if (empty($ent_user)) {
+                $this->message('User not found for this agreement.');
+                return;
+            }
             $ddate = empty($ent->created) ? $ent_user->created->i18nFormat('MM/dd/yyyy') : $ent->created->i18nFormat('MM/dd/yyyy');
             $ddate = empty($ent->created) ? '' : $ent->created->i18nFormat('MM/dd/yyyy');
             $img_html = $ent->file_id > 0 ? '<img src="' . $this->URL_API . '?key=2fe548d5ae881ccfbe2be3f6237d7951&l3n4p=6092482f7ce858.91169218&action=get-file&token=6092482f7ce858.91169218&id=' . $ent->file_id . '" style="height:100; width:100;">' : '';
             $content = $ent->content;
+            // Remove ALL img tags - external URLs and get-file URLs often fail when HTML2PDF fetches them server-side
+            $content = preg_replace('/<img[^>]*>/i', '', $content);
+            // Simplify external links to plain text (links can cause issues in HTML2PDF)
+            $content = preg_replace('/<a\s+[^>]*href=["\']https?:\/\/[^"\']*["\'][^>]*>([^<]*)<\/a>/i', '$1', $content);
             $content = str_replace('210mm;', '190mm;', $content);
             $content = str_replace('190mm;', '170mm;', $content);
             $patient_block ='';  
@@ -32407,15 +32441,26 @@ class MainController extends AppPluginController {
                 }   
             }else{
                 $content = str_replace('[patient_block]', $patient_block, $content);
-            }        
+            }
+            // Final pass: remove any remaining img tags (including patient signature) that can cause HTML2PDF to fail
+            $content = preg_replace('/<img[^>]*>/i', '', $content);
+            // Repair malformed HTML - DOMDocument auto-closes unclosed tags
+            $content = $this->_repairHtmlForPdf($content);
         } else {
 
             return;
         }
  
-        $html2pdf = new HTML2PDF('F','A4','en', true, 'UTF-8', array(10,10,10,10));   
-        $html2pdf->writeHTML($content);
-        $html2pdf->Output('consent.pdf', 'I');
+        try {
+            $html2pdf = new HTML2PDF('F','A4','en', true, 'UTF-8', array(10,10,10,10));
+            $html2pdf->setTestTdInOnePage(false);
+            $html2pdf->writeHTML($content);
+            $html2pdf->Output('consent.pdf', 'I');
+        } catch (\Exception $e) {
+            $this->log('print_agreement PDF error: ' . $e->getMessage(), 'error');
+            $this->message('Failed to generate PDF: ' . $e->getMessage());
+            return;
+        }
 
     }
 
