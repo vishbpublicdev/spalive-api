@@ -1,5 +1,5 @@
 <?php
-declare(strict_types=1);
+declare(strict_types=1); 
 
 namespace SpaLiveV1\Controller;
 use App\Controller\AppPluginController;
