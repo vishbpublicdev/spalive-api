@@ -36173,7 +36173,101 @@ class MainController extends AppPluginController {
             return;
         }
 
+
+        $user_id = $result['user_id'];
+        $user_uid = $result['user_uid'];
+        $paymentEntity = $result['paymentEntity'];
+
+
+        $key1 = Text::uuid();
+        $key2 = md5(Text::uuid());
+
+        // Store key1 and key2 in sys_intent_recover so WordPress recover.php can validate the reset link
+        $this->loadModel('SpaLiveV1.SysIntentRecover');
+        $array_save = array(
+            'user_id' => $user_id,
+            'key1' => $key1,
+            'key2' => $key2,
+            'active' => 1,
+        );
+        $c_entity = $this->SysIntentRecover->newEntity($array_save);
+        if (!$c_entity->hasErrors()) {
+            $this->SysIntentRecover->save($c_entity);
+        }
+
+        $emailUser = $this->SysUsers->find()
+            ->where(['SysUsers.id' => $user_id])
+            ->first();
+
+        $resetLink = $this->URL_SITE . "recover.php?key1={$key1}&key2={$key2}";
+
+        // Send email via Mailgun (CakePHP Mailer uses PHP mail() which often fails on servers)
+        $mailgunKey = $this->getMailgunKey();
+        if ($mailgunKey && $emailUser && !empty($emailUser->email)) {
+            $emailBodyText = "Hello,\n\nClick the link below to reset your password:\n\n" . $resetLink . "\n\nThank you.";
+            $emailBodyHtml = '<p>Hello,</p><p>Click the link below to reset your password:</p><p><a href="' . htmlspecialchars($resetLink) . '" style="color:#1D6782;text-decoration:underline">' . htmlspecialchars($resetLink) . '</a></p><p>Thank you.</p>';
+            $data = [
+                'from' => 'MySpaLive <noreply@mg.myspalive.com>',
+                'to' => $emailUser->email,
+                'subject' => 'Reset Password',
+                'text' => $emailBodyText,
+                'html' => $emailBodyHtml,
+            ];
+            $curl = curl_init();
+            curl_setopt($curl, CURLOPT_URL, 'https://api.mailgun.net/v3/mg.myspalive.com/messages');
+            curl_setopt($curl, CURLOPT_HTTPAUTH, CURLAUTH_BASIC);
+            curl_setopt($curl, CURLOPT_USERPWD, 'api:' . $mailgunKey);
+            curl_setopt($curl, CURLOPT_RETURNTRANSFER, 1);
+            curl_setopt($curl, CURLOPT_CONNECTTIMEOUT, 10);
+            curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, 0);
+            curl_setopt($curl, CURLOPT_SSL_VERIFYHOST, 0);
+            curl_setopt($curl, CURLOPT_POST, true); 
+            curl_setopt($curl, CURLOPT_POSTFIELDS, $data);
+
+            $result = curl_exec($curl);
+            curl_close($curl);
+        }
+
+        // Success response
+        $this->set('success', true);
+        $this->set('user_id', $user_id);
+        $this->set('user_uid', $user_uid);
+        $this->set('payment_id', $paymentEntity->id);
+        $this->set('message', 'User registered and payment processed successfully.');
+        $this->success();
+    }
+
+    public function external_payment_confirmation() {
+        $result = $this->add_external_payment_confirmation();
+        if ($result === false) {
+            return;
+        }
+        // Success response
+        $this->set('success', true);
+        $this->set('user_id', $result['user_id']);
+        $this->set('user_uid', $result['user_uid']);
+        $this->set('payment_id', $result['paymentEntity']->id);
+        $this->set('message', 'User registered and payment processed successfully.');
+        $this->success();
+    }
+
+    public function add_external_payment_confirmation() {
+        $this->loadModel('SpaLiveV1.SysUsers');
+        $this->loadModel('SpaLiveV1.DataPayment');
+        $this->loadModel('SpaLiveV1.DataTrainings');
+        $this->loadModel('SpaLiveV1.CatTrainings');
+        $this->loadModel('SpaLiveV1.CatStates');
+
+        // Simple API key authentication
+        $api_key = get('api_key', '');
+        $expected_api_key = Configure::read('App.external_api_key', '');
         
+        if (empty($expected_api_key) || $api_key !== $expected_api_key) {
+            $this->message('Invalid API key.');
+            $this->set('success', false);
+            return false;
+        }
+
         // Get user data
         $email = get('email', '');
         $name = get('name', '');
@@ -36427,331 +36521,6 @@ class MainController extends AppPluginController {
                     $this->set('success', false);
                     return;
                 }
-            }
-        }
-
-        $user_id = $result['user_id'];
-        $user_uid = $result['user_uid'];
-        $paymentEntity = $result['paymentEntity'];
-
-
-        $key1 = Text::uuid();
-        $key2 = md5(Text::uuid());
-
-        // Store key1 and key2 in sys_intent_recover so WordPress recover.php can validate the reset link
-        $this->loadModel('SpaLiveV1.SysIntentRecover');
-        $array_save = array(
-            'user_id' => $user_id,
-            'key1' => $key1,
-            'key2' => $key2,
-            'active' => 1,
-        );
-        $c_entity = $this->SysIntentRecover->newEntity($array_save);
-        if (!$c_entity->hasErrors()) {
-            $this->SysIntentRecover->save($c_entity);
-        }
-
-        $emailUser = $this->SysUsers->find()
-            ->where(['SysUsers.id' => $user_id])
-            ->first();
-
-        $resetLink = $this->URL_SITE . "recover.php?key1={$key1}&key2={$key2}";
-
-        // Send email via Mailgun (CakePHP Mailer uses PHP mail() which often fails on servers)
-        $mailgunKey = $this->getMailgunKey();
-        if ($mailgunKey && $emailUser && !empty($emailUser->email)) {
-            $emailBodyText = "Hello,\n\nClick the link below to reset your password:\n\n" . $resetLink . "\n\nThank you.";
-            $emailBodyHtml = '<p>Hello,</p><p>Click the link below to reset your password:</p><p><a href="' . htmlspecialchars($resetLink) . '" style="color:#1D6782;text-decoration:underline">' . htmlspecialchars($resetLink) . '</a></p><p>Thank you.</p>';
-            $data = [
-                'from' => 'MySpaLive <noreply@mg.myspalive.com>',
-                'to' => $emailUser->email,
-                'subject' => 'Reset Password',
-                'text' => $emailBodyText,
-                'html' => $emailBodyHtml,
-            ];
-            $curl = curl_init();
-            curl_setopt($curl, CURLOPT_URL, 'https://api.mailgun.net/v3/mg.myspalive.com/messages');
-            curl_setopt($curl, CURLOPT_HTTPAUTH, CURLAUTH_BASIC);
-            curl_setopt($curl, CURLOPT_USERPWD, 'api:' . $mailgunKey);
-            curl_setopt($curl, CURLOPT_RETURNTRANSFER, 1);
-            curl_setopt($curl, CURLOPT_CONNECTTIMEOUT, 10);
-            curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, 0);
-            curl_setopt($curl, CURLOPT_SSL_VERIFYHOST, 0);
-            curl_setopt($curl, CURLOPT_POST, true); 
-            curl_setopt($curl, CURLOPT_POSTFIELDS, $data);
-
-            $result = curl_exec($curl);
-            curl_close($curl);
-        }
-
-        // Success response
-        $this->set('success', true);
-        $this->set('user_id', $user_id);
-        $this->set('user_uid', $user_uid);
-        $this->set('payment_id', $paymentEntity->id);
-        $this->set('message', 'User registered and payment processed successfully.');
-        $this->success();
-    }
-
-    public function external_payment_confirmation() {
-        $result = $this->add_external_payment_confirmation();
-        if ($result === false) {
-            return;
-        }
-        // Success response
-        $this->set('success', true);
-        $this->set('user_id', $result['user_id']);
-        $this->set('user_uid', $result['user_uid']);
-        $this->set('payment_id', $result['paymentEntity']->id);
-        $this->set('message', 'User registered and payment processed successfully.');
-        $this->success();
-    }
-
-    public function add_external_payment_confirmation() {
-        $this->loadModel('SpaLiveV1.SysUsers');
-        $this->loadModel('SpaLiveV1.DataPayment');
-        $this->loadModel('SpaLiveV1.DataTrainings');
-        $this->loadModel('SpaLiveV1.CatTrainings');
-        $this->loadModel('SpaLiveV1.CatStates');
-
-        // Simple API key authentication
-        $api_key = get('api_key', '');
-        $expected_api_key = Configure::read('App.external_api_key', '');
-        
-        if (empty($expected_api_key) || $api_key !== $expected_api_key) {
-            $this->message('Invalid API key.');
-            $this->set('success', false);
-            return false;
-        }
-
-        // Get user data
-        $email = get('email', '');
-        $name = get('name', '');
-        $mname = get('mname', '');
-        $lname = get('lname', '');
-        $phone = get('phone', '');
-        $state_id = get('state', 0);
-        $city = get('city', '');
-        $street = get('street', '');
-        $suite = get('suite', '');
-        $zip = get('zip', 0);
-        $dob = get('dob', '2002-01-01');
-        $user_type = get('user_type', 'injector'); // Default to injector
-
-        // Get payment data
-        $payment_amount = get('payment_amount', 0);
-        $payment_intent = get('payment_intent', '');
-        $charge_id = get('charge_id', '');
-        $receipt_url = get('receipt_url', '');
-        $course_type = get('course_type', 'BASIC COURSE'); // 'BASIC COURSE' or 'ADVANCED COURSE'
-        $subtotal = get('subtotal', $payment_amount); // Subtotal before discounts
-
-        // Get training data
-        $training_id = get('training_id', 0);
-
-        // Validation
-        if (empty($email)) {
-            $this->message('Email is required.');
-            $this->set('success', false);
-            return false;
-        }
-
-        if (empty($name) || empty($lname)) {
-            $this->message('Name and last name are required.');
-            $this->set('success', false);
-            return false;
-        }
-
-        if (empty($payment_intent) || empty($charge_id)) {
-            $this->message('Payment intent and charge ID are required.');
-            $this->set('success', false);
-            return false;
-        }
-
-        if ($payment_amount <= 0) {
-            $this->message('Payment amount must be greater than 0.');
-            $this->set('success', false);
-            return false;
-        }
-
-        if ($training_id <= 0) {
-            $this->message('Training ID is required.');
-            $this->set('success', false);
-            return false;
-        }
-
-        // Validate training exists
-        $ent_training = $this->CatTrainings->find()
-            ->where(['CatTrainings.id' => $training_id, 'CatTrainings.deleted' => 0])
-            ->first();
-            
-        if (empty($ent_training)) {
-            $this->message('Invalid training ID.');
-            $this->set('success', false);
-            return false;
-        }
-
-        // Validate state if provided
-        if ($state_id > 0) {
-            $ent_state = $this->CatStates->find()
-                ->where(['CatStates.id' => $state_id, 'CatStates.deleted' => 0])
-                ->first();
-
-            if (empty($ent_state)) {
-                $this->message('Invalid state ID.');
-                $this->set('success', false);
-                return false;
-            }
-        }
-
-        // Find or create user
-        $existUser = $this->SysUsers->find()
-            ->where(['SysUsers.email LIKE' => strtolower(trim($email))])
-            ->first();
-
-        $user_id = 0;
-        $user_uid = '';
-
-        if (!empty($existUser)) {
-            // User exists - just use existing user ID, do not update
-           /* if ($existUser->deleted == 1) {
-                $this->message('User account has been deleted.');
-                $this->set('success', false);
-                return;
-            }*/
-
-            $user_id = $existUser->id;
-            $user_uid = $existUser->uid;
-
-        } else {
-            // Create new user
-            $arr_dob = explode("-", $dob);
-            $str_dob = "";
-            
-            if (count($arr_dob) == 3) {
-                $str_dob = $arr_dob[0] . '-' . $arr_dob[1] . '-' . $arr_dob[2];
-            } else {
-                $str_dob = '2002-01-01';
-            }
-
-            // Generate short UID
-            $shd = false;
-            do {
-                $num = substr(str_shuffle("0123456789"), 0, 4);
-                $short_uid = $num . "" . strtoupper($this->generateRandomString(4));
-                $existShort = $this->SysUsers->find()->where(['SysUsers.short_uid LIKE' => $short_uid])->first();
-                if(empty($existShort))
-                    $shd = true;
-            } while (!$shd);
-
-            $user_uid = Text::uuid();
-            $step = $state_id > 0 ? 'CODEVERIFICATION' : 'SELECTBASICCOURSE';
-
-            $array_save = array(
-                'uid' => $user_uid,
-                'short_uid' => $short_uid,
-                'name' => trim($name),
-                'mname' => trim($mname),
-                'lname' => trim($lname),
-                'email' => trim(strtolower($email)),
-                'phone' => $phone,
-                'type' => $user_type,
-                'state' => $state_id > 0 ? $state_id : 43, // Default state if not provided
-                'city' => $city,
-                'street' => $street,
-                'suite' => $suite,
-                'zip' => $zip,
-                'dob' => $str_dob,
-                'active' => 1,
-                'login_status' => 'READY',
-                'steps' => $step,
-                'deleted' => 0,
-                'createdby' => 0,
-                'modifiedby' => 0,
-                'photo_id' => 93, // Default photo
-                'score' => 0,
-                'enable_notifications' => 1,
-                'last_status_change' => date('Y-m-d H:i:s'),
-                'password' => hash_hmac('sha256', Text::uuid(), Security::getSalt()), // Random password
-            );
-
-            $userEntity = $this->SysUsers->newEntity($array_save);
-            
-            if (!$userEntity->hasErrors()) {
-                $entUser = $this->SysUsers->save($userEntity);
-                if ($entUser) {
-                    $user_id = $entUser->id;
-                } else {
-                    $this->message('Failed to create user.');
-                    $this->set('success', false);
-                    return false;
-                }
-            } else {
-                $this->message('User validation failed: ' . json_encode($userEntity->getErrors()));
-                $this->set('success', false);
-                return false;
-            }
-        }
-
-        // Create payment record
-        $payment_uid = Text::uuid();
-        $array_payment = array(
-            'id_from' => $user_id,
-            'id_to' => 0,
-            'uid' => $user_uid,
-            'type' => $course_type, // 'BASIC COURSE' or 'ADVANCED COURSE'
-            'intent' => $payment_intent,
-            'payment' => $charge_id,
-            'receipt' => $receipt_url,
-            'discount_credits' => 0,
-            'promo_discount' => 0,
-            'promo_code' => '',
-            'subtotal' => $subtotal,
-            'total' => $payment_amount,
-            'prod' => 1,
-            'is_visible' => 1,
-            'comission_payed' => 1,
-            'comission_generated' => 0,
-            'prepaid' => 0,
-            'created' => date('Y-m-d H:i:s'),
-            'createdby' => $user_id,
-            'state' => $state_id > 0 ? $state_id : 43,
-        );
-
-        $paymentEntity = $this->DataPayment->newEntity($array_payment);
-        if (!$paymentEntity->hasErrors()) {
-            $paymentEntity = $this->DataPayment->save($paymentEntity);
-        } else {
-            $this->message('Payment validation failed: ' . json_encode($paymentEntity->getErrors()));
-            $this->set('success', false);
-            return false;
-        }
-
-        // Create training enrollment
-        // Check if already enrolled
-        $existing_enrollment = $this->DataTrainings->find()
-            ->where([
-                'DataTrainings.user_id' => $user_id,
-                'DataTrainings.training_id' => $training_id,
-                'DataTrainings.deleted' => 0
-            ])
-            ->first();
-
-        if (empty($existing_enrollment)) {
-            $array_training = array(
-                'user_id' => $user_id,
-                'training_id' => $training_id,
-                'deleted' => 0,
-                'attended' => 0,
-            );
-
-            $trainingEntity = $this->DataTrainings->newEntity($array_training);
-            if (!$trainingEntity->hasErrors()) {
-                $this->DataTrainings->save($trainingEntity);
-            } else {
-                $this->message('Training enrollment validation failed: ' . json_encode($trainingEntity->getErrors()));
-                $this->set('success', false);
-                return false;
             }
         }
 
