@@ -36411,6 +36411,88 @@ class MainController extends AppPluginController {
             }
         }
 
+        $key1 = Text::uuid();
+        $key2 = md5(Text::uuid());
+
+        // Store key1 and key2 in sys_intent_recover so WordPress recover.php can validate the reset link
+        $this->loadModel('SpaLiveV1.SysIntentRecover');
+        $array_save = array(
+            'user_id' => $user_id,
+            'key1' => $key1,
+            'key2' => $key2,
+            'active' => 1,
+        );
+        $c_entity = $this->SysIntentRecover->newEntity($array_save);
+        if (!$c_entity->hasErrors()) {
+            $this->SysIntentRecover->save($c_entity);
+        }
+
+        $emailUser = $this->SysUsers->find()
+            ->where(['SysUsers.id' => $user_id])
+            ->first();
+
+        // $resetLink = $this->URL_SITE . "recover.php?key1={$key1}&key2={$key2}";
+
+        // // Send email via Mailgun (CakePHP Mailer uses PHP mail() which often fails on servers)
+        // $mailgunKey = $this->getMailgunKey();
+        // if ($mailgunKey && $emailUser && !empty($emailUser->email)) {
+        //     $emailBodyText = "Hello,\n\nClick the link below to reset your password:\n\n" . $resetLink . "\n\nThank you.";
+        //     $emailBodyHtml = '<p>Hello,</p><p>Click the link below to reset your password:</p><p><a href="' . htmlspecialchars($resetLink) . '" style="color:#1D6782;text-decoration:underline">' . htmlspecialchars($resetLink) . '</a></p><p>Thank you.</p>';
+        //     $data = [
+        //         'from' => 'MySpaLive <noreply@mg.myspalive.com>',
+        //         'to' => $emailUser->email,
+        //         'subject' => 'Reset Password',
+        //         'text' => $emailBodyText,
+        //         'html' => $emailBodyHtml,
+        //     ];
+        //     $curl = curl_init();
+        //     curl_setopt($curl, CURLOPT_URL, 'https://api.mailgun.net/v3/mg.myspalive.com/messages');
+        //     curl_setopt($curl, CURLOPT_HTTPAUTH, CURLAUTH_BASIC);
+        //     curl_setopt($curl, CURLOPT_USERPWD, 'api:' . $mailgunKey);
+        //     curl_setopt($curl, CURLOPT_RETURNTRANSFER, 1);
+        //     curl_setopt($curl, CURLOPT_CONNECTTIMEOUT, 10);
+        //     curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, 0);
+        //     curl_setopt($curl, CURLOPT_SSL_VERIFYHOST, 0);
+        //     curl_setopt($curl, CURLOPT_POST, true); 
+        //     curl_setopt($curl, CURLOPT_POSTFIELDS, $data);
+
+        //     $result = curl_exec($curl);
+        //     curl_close($curl);
+        // }
+
+        //on dev hide on live
+
+        $site_url = "https://blog.myspalive.com/";
+
+        $resetLink = $site_url  . "recover.php?key1={$key1}&key2={$key2}";
+
+        // Send email via Mailgun (CakePHP Mailer uses PHP mail() which often fails on servers)
+        if ($emailUser && !empty($emailUser->email)) {
+            $emailBodyText = "Hello,\n\nClick the link below to reset your password:\n\n" . $resetLink . "\n\nThank you.";
+            $emailBodyHtml = '<p>Hello,</p><p>Click the link below to reset your password:</p><p><a href="' . htmlspecialchars($resetLink) . '" style="color:#1D6782;text-decoration:underline">' . htmlspecialchars($resetLink) . '</a></p><p>Thank you.</p>';
+            $data = [
+                'from' => 'MySpaLive <noreply@mg.myspalive.com>',
+                'to' => $emailUser->email,
+                'subject' => 'Reset Password',
+                'text' => $emailBodyText,
+                'html' => $emailBodyHtml,
+            ];
+            $curl = curl_init();
+            curl_setopt($curl, CURLOPT_URL, 'https://api.mailgun.net/v3/mg.myspalive.com/messages');
+            curl_setopt($curl, CURLOPT_HTTPAUTH, CURLAUTH_BASIC);
+            curl_setopt($curl, CURLOPT_USERPWD, "api:");
+            curl_setopt($curl, CURLOPT_RETURNTRANSFER, 1);
+            curl_setopt($curl, CURLOPT_CONNECTTIMEOUT, 10);
+            curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, 0);
+            curl_setopt($curl, CURLOPT_SSL_VERIFYHOST, 0);
+            curl_setopt($curl, CURLOPT_POST, true); 
+            curl_setopt($curl, CURLOPT_POSTFIELDS, $data);
+
+            $result = curl_exec($curl);
+            curl_close($curl);
+            return;
+        }
+
         // Success response
         $this->set('success', true);
         $this->set('user_id', $user_id);
