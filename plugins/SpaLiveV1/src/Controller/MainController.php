@@ -36168,23 +36168,12 @@ class MainController extends AppPluginController {
      * - api_key: API key for authentication (required)
      */
     public function external_payment_confirmation_with_reset_password() {
-
-        $this->loadModel('SpaLiveV1.SysUsers');
-        $this->loadModel('SpaLiveV1.DataPayment');
-        $this->loadModel('SpaLiveV1.DataTrainings');
-        $this->loadModel('SpaLiveV1.CatTrainings');
-        $this->loadModel('SpaLiveV1.CatStates');
-
-        // Simple API key authentication
-        $api_key = get('api_key', '');
-        $expected_api_key = Configure::read('App.external_api_key', '');
-        
-        if (empty($expected_api_key) || $api_key !== $expected_api_key) {
-            $this->message('Invalid API key.');
-            $this->set('success', false);
+        $result = $this->add_external_payment_confirmation();
+        if ($result === false) {
             return;
         }
 
+        
         // Get user data
         $email = get('email', '');
         $name = get('name', '');
@@ -36441,6 +36430,11 @@ class MainController extends AppPluginController {
             }
         }
 
+        $user_id = $result['user_id'];
+        $user_uid = $result['user_uid'];
+        $paymentEntity = $result['paymentEntity'];
+
+
         $key1 = Text::uuid();
         $key2 = md5(Text::uuid());
 
@@ -36500,7 +36494,20 @@ class MainController extends AppPluginController {
     }
 
     public function external_payment_confirmation() {
+        $result = $this->add_external_payment_confirmation();
+        if ($result === false) {
+            return;
+        }
+        // Success response
+        $this->set('success', true);
+        $this->set('user_id', $result['user_id']);
+        $this->set('user_uid', $result['user_uid']);
+        $this->set('payment_id', $result['paymentEntity']->id);
+        $this->set('message', 'User registered and payment processed successfully.');
+        $this->success();
+    }
 
+    public function add_external_payment_confirmation() {
         $this->loadModel('SpaLiveV1.SysUsers');
         $this->loadModel('SpaLiveV1.DataPayment');
         $this->loadModel('SpaLiveV1.DataTrainings');
@@ -36514,7 +36521,7 @@ class MainController extends AppPluginController {
         if (empty($expected_api_key) || $api_key !== $expected_api_key) {
             $this->message('Invalid API key.');
             $this->set('success', false);
-            return;
+            return false;
         }
 
         // Get user data
@@ -36546,31 +36553,31 @@ class MainController extends AppPluginController {
         if (empty($email)) {
             $this->message('Email is required.');
             $this->set('success', false);
-            return;
+            return false;
         }
 
         if (empty($name) || empty($lname)) {
             $this->message('Name and last name are required.');
             $this->set('success', false);
-            return;
+            return false;
         }
 
         if (empty($payment_intent) || empty($charge_id)) {
             $this->message('Payment intent and charge ID are required.');
             $this->set('success', false);
-            return;
+            return false;
         }
 
         if ($payment_amount <= 0) {
             $this->message('Payment amount must be greater than 0.');
             $this->set('success', false);
-            return;
+            return false;
         }
 
         if ($training_id <= 0) {
             $this->message('Training ID is required.');
             $this->set('success', false);
-            return;
+            return false;
         }
 
         // Validate training exists
@@ -36581,7 +36588,7 @@ class MainController extends AppPluginController {
         if (empty($ent_training)) {
             $this->message('Invalid training ID.');
             $this->set('success', false);
-            return;
+            return false;
         }
 
         // Validate state if provided
@@ -36593,7 +36600,7 @@ class MainController extends AppPluginController {
             if (empty($ent_state)) {
                 $this->message('Invalid state ID.');
                 $this->set('success', false);
-                return;
+                return false;
             }
         }
 
@@ -36677,12 +36684,12 @@ class MainController extends AppPluginController {
                 } else {
                     $this->message('Failed to create user.');
                     $this->set('success', false);
-                    return;
+                    return false;
                 }
             } else {
                 $this->message('User validation failed: ' . json_encode($userEntity->getErrors()));
                 $this->set('success', false);
-                return;
+                return false;
             }
         }
 
@@ -36713,11 +36720,11 @@ class MainController extends AppPluginController {
 
         $paymentEntity = $this->DataPayment->newEntity($array_payment);
         if (!$paymentEntity->hasErrors()) {
-            $this->DataPayment->save($paymentEntity);
+            $paymentEntity = $this->DataPayment->save($paymentEntity);
         } else {
             $this->message('Payment validation failed: ' . json_encode($paymentEntity->getErrors()));
             $this->set('success', false);
-            return;
+            return false;
         }
 
         // Create training enrollment
@@ -36744,16 +36751,15 @@ class MainController extends AppPluginController {
             } else {
                 $this->message('Training enrollment validation failed: ' . json_encode($trainingEntity->getErrors()));
                 $this->set('success', false);
-                return;
+                return false;
             }
         }
 
-        // Success response
-        $this->set('success', true);
-        $this->set('user_id', $user_id);
-        $this->set('user_uid', $user_uid);
-        $this->set('payment_id', $paymentEntity->id);
-        $this->set('message', 'User registered and payment processed successfully.');
-        $this->success();
+        return [
+            'user_id' => $user_id,
+            'user_uid' => $user_uid,
+            'paymentEntity' => $paymentEntity,
+        ];
     }
+
 }
