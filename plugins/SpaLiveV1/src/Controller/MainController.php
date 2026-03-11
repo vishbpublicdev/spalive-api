@@ -36158,8 +36158,13 @@ class MainController extends AppPluginController {
      * - payment_intent: Stripe Payment Intent ID (required)
      * - charge_id: Stripe Charge ID (required)
      * - receipt_url: Receipt URL (optional)
-     * - training_id: Training ID to enroll in (required)
-     * - course_type: Course type ('BASIC COURSE' or 'ADVANCED COURSE') (required)
+     * - training_id: Training ID to enroll in (optional - only creates data_trainings entry if provided)
+     * - type_course: Course name (preferred) - will be mapped to payment type
+     *                Examples: 'NEUROTOXINS BASIC' → 'BASIC COURSE', 
+     *                         'NEUROTOXINS ADVANCED' → 'ADVANCED COURSE',
+     *                         'MYSPALIVE_S_HYBRID_TOX_FILLER_COURSE' → stored as-is
+     * - course_type: Direct payment type (alternative to type_course, for backward compatibility)
+     *                Examples: 'BASIC COURSE', 'ADVANCED COURSE', 'MYSPALIVE_S_HYBRID_TOX_FILLER_COURSE'
      * - api_key: API key for authentication (required)
      */
     public function external_payment_confirmation() {
@@ -36199,12 +36204,42 @@ class MainController extends AppPluginController {
         $payment_intent = get('payment_intent', '');
         $charge_id = get('charge_id', '');
         $receipt_url = get('receipt_url', '');
-        $course_type = get('course_type', 'BASIC COURSE'); // 'BASIC COURSE' or 'ADVANCED COURSE'
+        
+        // Get course type - accept both 'type_course' (normal flow) or 'course_type' (direct value)
+        $type_course = get('type_course', '');
+        $course_type = get('course_type', '');
+        
+        // Map course name to payment type (same logic as payment_intent_course())
+        $type_string = '';
+        if (!empty($type_course)) {
+            // Normal flow: map course name to payment type
+            switch ($type_course) {
+                case 'NEUROTOXINS BASIC':
+                    $type_string = 'BASIC COURSE';
+                    break;
+                case 'NEUROTOXINS ADVANCED':
+                    $type_string = 'ADVANCED COURSE';
+                    break;
+                case 'ADVANCED TECHNIQUES MEDICAL':
+                    $type_string = 'ADVANCED TECHNIQUES MEDICAL';
+                    break;
+                default:
+                    $type_string = $type_course; // For courses like 'MYSPALIVE_S_HYBRID_TOX_FILLER_COURSE'
+                    break;
+            }
+        } else if (!empty($course_type)) {
+            // Direct value: use as-is (for backward compatibility)
+            $type_string = $course_type;
+        } else {
+            // Default fallback
+            $type_string = 'BASIC COURSE';
+        }
+        
         $subtotal = get('subtotal', $payment_amount); // Subtotal before discounts
 
         // Get training data
         $training_id = get('training_id', 0);
-
+        
         // Validation
         if (empty($email)) {
             $this->message('Email is required.');
@@ -36230,30 +36265,23 @@ class MainController extends AppPluginController {
             return;
         }
 
-        if ($training_id <= 0) {
-            $this->message('Training ID is required.');
-            $this->set('success', false);
-            return;
-        }
-
-        // Validate training exists
-        $ent_training = $this->CatTrainings->find()
-            ->where(['CatTrainings.id' => $training_id, 'CatTrainings.deleted' => 0])
-            ->first();
-            
-        if (empty($ent_training)) {
-            $this->message('Invalid training ID.');
-            $this->set('success', false);
-            return;
+        // Validate training exists only if training_id is provided (optional)
+        if ($training_id > 0) {
+            $ent_training = $this->CatTrainings->find()
+                ->where(['CatTrainings.id' => $training_id, 'CatTrainings.deleted' => 0])
+                ->first();
+                
+            if (empty($ent_training)) {
+                $this->message('Invalid training ID.');
+                $this->set('success', false);
+                return;
+            }
         }
 
         // Validate state if provided
         if ($state_id > 0) {
-            $ent_state = $this->CatStates->find()
-                ->where(['CatStates.id' => $state_id, 'CatStates.deleted' => 0])
-                ->first();
-
-            if (empty($ent_state)) {
+            $state_exists = $this->CatStates->exists(['CatStates.id' => $state_id, 'CatStates.deleted' => 0]);
+            if (!$state_exists) {
                 $this->message('Invalid state ID.');
                 $this->set('success', false);
                 return;
@@ -36355,7 +36383,7 @@ class MainController extends AppPluginController {
             'id_from' => $user_id,
             'id_to' => 0,
             'uid' => $user_uid,
-            'type' => $course_type, // 'BASIC COURSE' or 'ADVANCED COURSE'
+            'type' => $type_string, // Mapped course type (e.g., 'BASIC COURSE', 'ADVANCED COURSE', 'MYSPALIVE_S_HYBRID_TOX_FILLER_COURSE')
             'intent' => $payment_intent,
             'payment' => $charge_id,
             'receipt' => $receipt_url,
@@ -36383,31 +36411,33 @@ class MainController extends AppPluginController {
             return;
         }
 
-        // Create training enrollment
-        // Check if already enrolled
-        $existing_enrollment = $this->DataTrainings->find()
-            ->where([
-                'DataTrainings.user_id' => $user_id,
-                'DataTrainings.training_id' => $training_id,
-                'DataTrainings.deleted' => 0
-            ])
-            ->first();
+        // Create training enrollment (only if training_id is provided - matching normal flow)
+        if ($training_id > 0) {
+            // Check if already enrolled
+            $existing_enrollment = $this->DataTrainings->find()
+                ->where([
+                    'DataTrainings.user_id' => $user_id,
+                    'DataTrainings.training_id' => $training_id,
+                    'DataTrainings.deleted' => 0
+                ])
+                ->first();
 
-        if (empty($existing_enrollment)) {
-            $array_training = array(
-                'user_id' => $user_id,
-                'training_id' => $training_id,
-                'deleted' => 0,
-                'attended' => 0,
-            );
+            if (empty($existing_enrollment)) {
+                $array_training = array(
+                    'user_id' => $user_id,
+                    'training_id' => $training_id,
+                    'deleted' => 0,
+                    'attended' => 0,
+                );
 
-            $trainingEntity = $this->DataTrainings->newEntity($array_training);
-            if (!$trainingEntity->hasErrors()) {
-                $this->DataTrainings->save($trainingEntity);
-            } else {
-                $this->message('Training enrollment validation failed: ' . json_encode($trainingEntity->getErrors()));
-                $this->set('success', false);
-                return;
+                $trainingEntity = $this->DataTrainings->newEntity($array_training);
+                if (!$trainingEntity->hasErrors()) {
+                    $this->DataTrainings->save($trainingEntity);
+                } else {
+                    $this->message('Training enrollment validation failed: ' . json_encode($trainingEntity->getErrors()));
+                    $this->set('success', false);
+                    return;
+                }
             }
         }
 
