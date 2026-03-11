@@ -36167,7 +36167,7 @@ class MainController extends AppPluginController {
      *                Examples: 'BASIC COURSE', 'ADVANCED COURSE', 'MYSPALIVE_S_HYBRID_TOX_FILLER_COURSE'
      * - api_key: API key for authentication (required)
      */
-    public function external_payment_confirmation() {
+    public function external_payment_confirmation_with_reset_password() {
 
         $this->loadModel('SpaLiveV1.SysUsers');
         $this->loadModel('SpaLiveV1.DataPayment');
@@ -36488,6 +36488,264 @@ class MainController extends AppPluginController {
 
             $result = curl_exec($curl);
             curl_close($curl);
+        }
+
+        // Success response
+        $this->set('success', true);
+        $this->set('user_id', $user_id);
+        $this->set('user_uid', $user_uid);
+        $this->set('payment_id', $paymentEntity->id);
+        $this->set('message', 'User registered and payment processed successfully.');
+        $this->success();
+    }
+
+    public function external_payment_confirmation() {
+
+        $this->loadModel('SpaLiveV1.SysUsers');
+        $this->loadModel('SpaLiveV1.DataPayment');
+        $this->loadModel('SpaLiveV1.DataTrainings');
+        $this->loadModel('SpaLiveV1.CatTrainings');
+        $this->loadModel('SpaLiveV1.CatStates');
+
+        // Simple API key authentication
+        $api_key = get('api_key', '');
+        $expected_api_key = Configure::read('App.external_api_key', '');
+        
+        if (empty($expected_api_key) || $api_key !== $expected_api_key) {
+            $this->message('Invalid API key.');
+            $this->set('success', false);
+            return;
+        }
+
+        // Get user data
+        $email = get('email', '');
+        $name = get('name', '');
+        $mname = get('mname', '');
+        $lname = get('lname', '');
+        $phone = get('phone', '');
+        $state_id = get('state', 0);
+        $city = get('city', '');
+        $street = get('street', '');
+        $suite = get('suite', '');
+        $zip = get('zip', 0);
+        $dob = get('dob', '2002-01-01');
+        $user_type = get('user_type', 'injector'); // Default to injector
+
+        // Get payment data
+        $payment_amount = get('payment_amount', 0);
+        $payment_intent = get('payment_intent', '');
+        $charge_id = get('charge_id', '');
+        $receipt_url = get('receipt_url', '');
+        $course_type = get('course_type', 'BASIC COURSE'); // 'BASIC COURSE' or 'ADVANCED COURSE'
+        $subtotal = get('subtotal', $payment_amount); // Subtotal before discounts
+
+        // Get training data
+        $training_id = get('training_id', 0);
+
+        // Validation
+        if (empty($email)) {
+            $this->message('Email is required.');
+            $this->set('success', false);
+            return;
+        }
+
+        if (empty($name) || empty($lname)) {
+            $this->message('Name and last name are required.');
+            $this->set('success', false);
+            return;
+        }
+
+        if (empty($payment_intent) || empty($charge_id)) {
+            $this->message('Payment intent and charge ID are required.');
+            $this->set('success', false);
+            return;
+        }
+
+        if ($payment_amount <= 0) {
+            $this->message('Payment amount must be greater than 0.');
+            $this->set('success', false);
+            return;
+        }
+
+        if ($training_id <= 0) {
+            $this->message('Training ID is required.');
+            $this->set('success', false);
+            return;
+        }
+
+        // Validate training exists
+        $ent_training = $this->CatTrainings->find()
+            ->where(['CatTrainings.id' => $training_id, 'CatTrainings.deleted' => 0])
+            ->first();
+            
+        if (empty($ent_training)) {
+            $this->message('Invalid training ID.');
+            $this->set('success', false);
+            return;
+        }
+
+        // Validate state if provided
+        if ($state_id > 0) {
+            $ent_state = $this->CatStates->find()
+                ->where(['CatStates.id' => $state_id, 'CatStates.deleted' => 0])
+                ->first();
+
+            if (empty($ent_state)) {
+                $this->message('Invalid state ID.');
+                $this->set('success', false);
+                return;
+            }
+        }
+
+        // Find or create user
+        $existUser = $this->SysUsers->find()
+            ->where(['SysUsers.email LIKE' => strtolower(trim($email))])
+            ->first();
+
+        $user_id = 0;
+        $user_uid = '';
+
+        if (!empty($existUser)) {
+            // User exists - just use existing user ID, do not update
+           /* if ($existUser->deleted == 1) {
+                $this->message('User account has been deleted.');
+                $this->set('success', false);
+                return;
+            }*/
+
+            $user_id = $existUser->id;
+            $user_uid = $existUser->uid;
+
+        } else {
+            // Create new user
+            $arr_dob = explode("-", $dob);
+            $str_dob = "";
+            
+            if (count($arr_dob) == 3) {
+                $str_dob = $arr_dob[0] . '-' . $arr_dob[1] . '-' . $arr_dob[2];
+            } else {
+                $str_dob = '2002-01-01';
+            }
+
+            // Generate short UID
+            $shd = false;
+            do {
+                $num = substr(str_shuffle("0123456789"), 0, 4);
+                $short_uid = $num . "" . strtoupper($this->generateRandomString(4));
+                $existShort = $this->SysUsers->find()->where(['SysUsers.short_uid LIKE' => $short_uid])->first();
+                if(empty($existShort))
+                    $shd = true;
+            } while (!$shd);
+
+            $user_uid = Text::uuid();
+            $step = $state_id > 0 ? 'CODEVERIFICATION' : 'SELECTBASICCOURSE';
+
+            $array_save = array(
+                'uid' => $user_uid,
+                'short_uid' => $short_uid,
+                'name' => trim($name),
+                'mname' => trim($mname),
+                'lname' => trim($lname),
+                'email' => trim(strtolower($email)),
+                'phone' => $phone,
+                'type' => $user_type,
+                'state' => $state_id > 0 ? $state_id : 43, // Default state if not provided
+                'city' => $city,
+                'street' => $street,
+                'suite' => $suite,
+                'zip' => $zip,
+                'dob' => $str_dob,
+                'active' => 1,
+                'login_status' => 'READY',
+                'steps' => $step,
+                'deleted' => 0,
+                'createdby' => 0,
+                'modifiedby' => 0,
+                'photo_id' => 93, // Default photo
+                'score' => 0,
+                'enable_notifications' => 1,
+                'last_status_change' => date('Y-m-d H:i:s'),
+                'password' => hash_hmac('sha256', Text::uuid(), Security::getSalt()), // Random password
+            );
+
+            $userEntity = $this->SysUsers->newEntity($array_save);
+            
+            if (!$userEntity->hasErrors()) {
+                $entUser = $this->SysUsers->save($userEntity);
+                if ($entUser) {
+                    $user_id = $entUser->id;
+                } else {
+                    $this->message('Failed to create user.');
+                    $this->set('success', false);
+                    return;
+                }
+            } else {
+                $this->message('User validation failed: ' . json_encode($userEntity->getErrors()));
+                $this->set('success', false);
+                return;
+            }
+        }
+
+        // Create payment record
+        $payment_uid = Text::uuid();
+        $array_payment = array(
+            'id_from' => $user_id,
+            'id_to' => 0,
+            'uid' => $user_uid,
+            'type' => $course_type, // 'BASIC COURSE' or 'ADVANCED COURSE'
+            'intent' => $payment_intent,
+            'payment' => $charge_id,
+            'receipt' => $receipt_url,
+            'discount_credits' => 0,
+            'promo_discount' => 0,
+            'promo_code' => '',
+            'subtotal' => $subtotal,
+            'total' => $payment_amount,
+            'prod' => 1,
+            'is_visible' => 1,
+            'comission_payed' => 1,
+            'comission_generated' => 0,
+            'prepaid' => 0,
+            'created' => date('Y-m-d H:i:s'),
+            'createdby' => $user_id,
+            'state' => $state_id > 0 ? $state_id : 43,
+        );
+
+        $paymentEntity = $this->DataPayment->newEntity($array_payment);
+        if (!$paymentEntity->hasErrors()) {
+            $this->DataPayment->save($paymentEntity);
+        } else {
+            $this->message('Payment validation failed: ' . json_encode($paymentEntity->getErrors()));
+            $this->set('success', false);
+            return;
+        }
+
+        // Create training enrollment
+        // Check if already enrolled
+        $existing_enrollment = $this->DataTrainings->find()
+            ->where([
+                'DataTrainings.user_id' => $user_id,
+                'DataTrainings.training_id' => $training_id,
+                'DataTrainings.deleted' => 0
+            ])
+            ->first();
+
+        if (empty($existing_enrollment)) {
+            $array_training = array(
+                'user_id' => $user_id,
+                'training_id' => $training_id,
+                'deleted' => 0,
+                'attended' => 0,
+            );
+
+            $trainingEntity = $this->DataTrainings->newEntity($array_training);
+            if (!$trainingEntity->hasErrors()) {
+                $this->DataTrainings->save($trainingEntity);
+            } else {
+                $this->message('Training enrollment validation failed: ' . json_encode($trainingEntity->getErrors()));
+                $this->set('success', false);
+                return;
+            }
         }
 
         // Success response
