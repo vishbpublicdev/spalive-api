@@ -36173,11 +36173,9 @@ class MainController extends AppPluginController {
             return;
         }
 
-
         $user_id = $result['user_id'];
         $user_uid = $result['user_uid'];
         $paymentEntity = $result['paymentEntity'];
-
 
         $key1 = Text::uuid();
         $key2 = md5(Text::uuid());
@@ -36203,6 +36201,7 @@ class MainController extends AppPluginController {
 
         // Send email via Mailgun (CakePHP Mailer uses PHP mail() which often fails on servers)
         $mailgunKey = $this->getMailgunKey();
+
         if ($mailgunKey && $emailUser && !empty($emailUser->email)) {
             $emailBodyText = "Hello,\n\nClick the link below to create your password:\n\n" . $resetLink . "\n\nThank you.";
             $emailBodyHtml = $this->reset_password_email_template($resetLink);
@@ -36301,10 +36300,10 @@ class MainController extends AppPluginController {
                     $type_string = 'BASIC COURSE';
                     break;
                 case 'COURSE_DERMAPLANNING':
-                    $type_string = 'Dermaplaning Peel Microneedling Course';
+                    $type_string = 'DERMAPLANING_PEEL_MICRONEEDLING_COURSE';
                     break;
                 case 'COURSE_HYBRID_TOX_FILLER':
-                    $type_string = 'Myspalive S Hybrid Tox Filler Course';
+                    $type_string = 'MYSPALIVE_S_HYBRID_TOX_FILLER_COURSE';
                     break;
                 default:
                     $type_string = 'OTHER TREATMENTS';
@@ -36409,7 +36408,15 @@ class MainController extends AppPluginController {
 
             $user_uid = Text::uuid();
             //$step = $state_id > 0 ? 'CODEVERIFICATION' : 'SELECTBASICCOURSE';
-            $step = 'SELECTBASICCOURSE';
+            if($type_string == 'BASIC COURSE')
+            {
+                $step = 'MATERIALS';
+            }
+            else
+            {
+                 $step = 'LICENCEOT';
+            }
+            
 
             $array_save = array(
                 'uid' => $user_uid,
@@ -36457,38 +36464,52 @@ class MainController extends AppPluginController {
             }
         }
 
-        // Create payment record
-        $payment_uid = Text::uuid();
-        $array_payment = array(
-            'id_from' => $user_id,
-            'id_to' => 0,
-            'uid' => $user_uid,
-            'type' => $type_string, 
-            'intent' => $payment_intent,
-            'payment' => $charge_id,
-            'receipt' => $receipt_url,
-            'discount_credits' => 0,
-            'promo_discount' => 0,
-            'promo_code' => '',
-            'subtotal' => $subtotal,
-            'total' => $payment_amount,
-            'prod' => 1,
-            'is_visible' => 1,
-            'comission_payed' => 1,
-            'comission_generated' => 0,
-            'prepaid' => 0,
-            'created' => date('Y-m-d H:i:s'),
-            'createdby' => $user_id,
-            'state' => $state_id > 0 ? $state_id : 43,
-        );
+        // Check if payment already exists (prevent duplicates)
+        $existing_payment = $this->DataPayment->find()
+            ->where([
+                'DataPayment.id_from' => $user_id,
+                'DataPayment.intent' => $payment_intent,
+                'DataPayment.payment' => $charge_id
+            ])
+            ->first();
 
-        $paymentEntity = $this->DataPayment->newEntity($array_payment);
-        if (!$paymentEntity->hasErrors()) {
-            $this->DataPayment->save($paymentEntity);
+        if (!empty($existing_payment)) {
+            // Payment already exists, return existing payment instead of creating duplicate
+            $paymentEntity = $existing_payment;
         } else {
-            $this->message('Payment validation failed: ' . json_encode($paymentEntity->getErrors()));
-            $this->set('success', false);
-            return;
+            // Create payment record
+            $payment_uid = Text::uuid();
+            $array_payment = array(
+                'id_from' => $user_id,
+                'id_to' => 0,
+                'uid' => $user_uid,
+                'type' => $type_string, 
+                'intent' => $payment_intent,
+                'payment' => $charge_id,
+                'receipt' => $receipt_url,
+                'discount_credits' => 0,
+                'promo_discount' => 0,
+                'promo_code' => '',
+                'subtotal' => $subtotal,
+                'total' => $payment_amount,
+                'prod' => 1,
+                'is_visible' => 1,
+                'comission_payed' => 1,
+                'comission_generated' => 0,
+                'prepaid' => 0,
+                'created' => date('Y-m-d H:i:s'),
+                'createdby' => $user_id,
+                'state' => $state_id > 0 ? $state_id : 43,
+            );
+
+            $paymentEntity = $this->DataPayment->newEntity($array_payment);
+            if (!$paymentEntity->hasErrors()) {
+                $this->DataPayment->save($paymentEntity);
+            } else {
+                $this->message('Payment validation failed: ' . json_encode($paymentEntity->getErrors()));
+                $this->set('success', false);
+                return;
+            }
         }
 
         // Create training enrollment (only if training_id is provided - matching normal flow)
