@@ -36204,12 +36204,12 @@ class MainController extends AppPluginController {
         // Send email via Mailgun (CakePHP Mailer uses PHP mail() which often fails on servers)
         $mailgunKey = $this->getMailgunKey();
         if ($mailgunKey && $emailUser && !empty($emailUser->email)) {
-            $emailBodyText = "Hello,\n\nClick the link below to reset your password:\n\n" . $resetLink . "\n\nThank you.";
-            $emailBodyHtml = '<p>Hello,</p><p>Click the link below to reset your password:</p><p><a href="' . htmlspecialchars($resetLink) . '" style="color:#1D6782;text-decoration:underline">' . htmlspecialchars($resetLink) . '</a></p><p>Thank you.</p>';
+            $emailBodyText = "Hello,\n\nClick the link below to create your password:\n\n" . $resetLink . "\n\nThank you.";
+            $emailBodyHtml = $this->reset_password_email_template($resetLink);
             $data = [
                 'from' => 'MySpaLive <noreply@mg.myspalive.com>',
                 'to' => $emailUser->email,
-                'subject' => 'Reset Password',
+                'subject' => 'Create Password',
                 'text' => $emailBodyText,
                 'html' => $emailBodyHtml,
             ];
@@ -36526,6 +36526,68 @@ class MainController extends AppPluginController {
             'user_uid' => $user_uid,
             'paymentEntity' => $paymentEntity,
         ];
+    }
+
+    public function reset_password_email_template($resetLink){
+        $emailBodyHtml = '
+            <div style="font-family:Arial,Helvetica,sans-serif;background:#f4f6f8;padding:30px">
+            <div style="max-width:600px;margin:auto;background:#ffffff;border-radius:8px;padding:30px">
+
+                <h2 style="color:#1D6782;margin-top:0;">Welcome to MySpaLive 👋</h2>
+
+                <p>
+                Congratulations on enrolling! We\'re excited to have you onboard.
+                </p>
+
+                <div style="background:#eef6f9;padding:15px;border-radius:6px;margin-top:20px">
+                <strong>Next Step: Create Your Password</strong>
+                <p style="margin:10px 0 0 0;">
+                    To complete your onboarding process, please create your password using the link below.
+                </p>
+                </div>
+
+                <h3 style="margin-top:25px;color:#333;">How to Get Started</h3>
+
+                <ol style="line-height:1.6;color:#444">
+                <li>
+                    <strong>Create your MySpaLive password</strong><br>
+                    Click the button below to create your password.
+                </li>
+
+                <li style="margin-top:10px">
+                    <strong>Log in to your account</strong><br>
+                    Use your email and new password to access your training materials.
+                </li>
+                </ol>
+
+                <div style="text-align:center;margin:30px 0">
+                <a href="' . htmlspecialchars($resetLink) . '" 
+                    style="background:#1D6782;color:#ffffff;padding:14px 28px;
+                    text-decoration:none;border-radius:5px;font-weight:bold;">
+                    Create Your Password
+                </a>
+                </div>
+
+                <p style="font-size:14px;color:#666;">
+                If the button doesn’t work, copy and paste this link into your browser:
+                </p>
+
+                <p style="word-break:break-all;font-size:14px">
+                <a href="' . htmlspecialchars($resetLink) . '">' . htmlspecialchars($resetLink) . '</a>
+                </p>
+
+                <hr style="margin:30px 0;border:none;border-top:1px solid #eee">
+
+                <p style="font-size:13px;color:#777">
+                Need help? Contact us at 
+                <a href="mailto:support@port2pay.com">support@port2pay.com</a>
+                </p>
+
+            </div>
+            </div>
+        ';
+
+        return $emailBodyHtml;
     }
 
 }
