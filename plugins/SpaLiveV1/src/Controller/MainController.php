@@ -36297,26 +36297,20 @@ class MainController extends AppPluginController {
         if (!empty($type_course)) {
             // Normal flow: map course name to payment type
             switch ($type_course) {
-                case 'NEUROTOXINS BASIC':
+                case 'COURSE_BASIC':
                     $type_string = 'BASIC COURSE';
                     break;
-                case 'NEUROTOXINS ADVANCED':
-                    $type_string = 'ADVANCED COURSE';
+                case 'COURSE_DERMAPLANNING':
+                    $type_string = 'Dermaplaning Peel Microneedling Course';
                     break;
-                case 'ADVANCED TECHNIQUES MEDICAL':
-                    $type_string = 'ADVANCED TECHNIQUES MEDICAL';
+                case 'COURSE_HYBRID_TOX_FILLER':
+                    $type_string = 'Myspalive S Hybrid Tox Filler Course';
                     break;
                 default:
-                    $type_string = $type_course; // For courses like 'MYSPALIVE_S_HYBRID_TOX_FILLER_COURSE'
+                    $type_string = 'OTHER TREATMENTS';
                     break;
             }
-        } else if (!empty($course_type)) {
-            // Direct value: use as-is (for backward compatibility)
-            $type_string = $course_type;
-        } else {
-            // Default fallback
-            $type_string = 'BASIC COURSE';
-        }
+        } 
         
         $subtotal = get('subtotal', $payment_amount); // Subtotal before discounts
 
@@ -36348,8 +36342,14 @@ class MainController extends AppPluginController {
             return;
         }
 
+        if ($course_type) {
+            $this->message('Course type is required.');
+            $this->set('success', false);
+            return;
+        }
+
         // Validate training exists only if training_id is provided (optional)
-        if ($training_id > 0) {
+       /*  if ($training_id > 0) {
             $ent_training = $this->CatTrainings->find()
                 ->where(['CatTrainings.id' => $training_id, 'CatTrainings.deleted' => 0])
                 ->first();
@@ -36359,17 +36359,17 @@ class MainController extends AppPluginController {
                 $this->set('success', false);
                 return;
             }
-        }
+        } */
 
         // Validate state if provided
-        if ($state_id > 0) {
+       /*  if ($state_id > 0) {
             $state_exists = $this->CatStates->exists(['CatStates.id' => $state_id, 'CatStates.deleted' => 0]);
             if (!$state_exists) {
                 $this->message('Invalid state ID.');
                 $this->set('success', false);
                 return;
             }
-        }
+        } */
 
         // Find or create user
         $existUser = $this->SysUsers->find()
@@ -36381,11 +36381,7 @@ class MainController extends AppPluginController {
 
         if (!empty($existUser)) {
             // User exists - just use existing user ID, do not update
-           /* if ($existUser->deleted == 1) {
-                $this->message('User account has been deleted.');
-                $this->set('success', false);
-                return;
-            }*/
+           
 
             $user_id = $existUser->id;
             $user_uid = $existUser->uid;
@@ -36412,7 +36408,8 @@ class MainController extends AppPluginController {
             } while (!$shd);
 
             $user_uid = Text::uuid();
-            $step = $state_id > 0 ? 'CODEVERIFICATION' : 'SELECTBASICCOURSE';
+            //$step = $state_id > 0 ? 'CODEVERIFICATION' : 'SELECTBASICCOURSE';
+            $step = 'SELECTBASICCOURSE';
 
             $array_save = array(
                 'uid' => $user_uid,
@@ -36466,7 +36463,7 @@ class MainController extends AppPluginController {
             'id_from' => $user_id,
             'id_to' => 0,
             'uid' => $user_uid,
-            'type' => $type_string, // Mapped course type (e.g., 'BASIC COURSE', 'ADVANCED COURSE', 'MYSPALIVE_S_HYBRID_TOX_FILLER_COURSE')
+            'type' => $type_string, 
             'intent' => $payment_intent,
             'payment' => $charge_id,
             'receipt' => $receipt_url,
