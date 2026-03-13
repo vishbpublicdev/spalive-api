@@ -36302,8 +36302,14 @@ class MainController extends AppPluginController {
                 case 'COURSE_DERMAPLANNING':
                     $type_string = 'DERMAPLANING_PEEL_MICRONEEDLING_COURSE';
                     break;
+                case 'COURSE_DERMAPLANNING_LIVE':
+                    $type_string = 'DERMAPLANING_PEEL_MICRONEEDLING';                    
+                    break;
                 case 'COURSE_HYBRID_TOX_FILLER':
                     $type_string = 'MYSPALIVE_S_HYBRID_TOX_FILLER_COURSE';
+                    break;
+                case 'COURSE_HYBRID_TOX_FILLER_LIVE':
+                    $type_string = 'MYSPALIVES_HYBRID_TOX_FILLER_COURSE';
                     break;
                 default:
                     $type_string = 'OTHER TREATMENTS';
@@ -36513,7 +36519,7 @@ class MainController extends AppPluginController {
         }
 
         // Create training enrollment (only if training_id is provided - matching normal flow)
-        if ($training_id > 0) {
+       /* if ($training_id > 0) {
             // Check if already enrolled
             $existing_enrollment = $this->DataTrainings->find()
                 ->where([
@@ -36540,7 +36546,7 @@ class MainController extends AppPluginController {
                     return;
                 }
             }
-        }
+        }*/
 
         return [
             'user_id' => $user_id,
