@@ -77,6 +77,63 @@ function validate_string($value, $length = false){
 
 }
 
+/**
+ * Log login attempt (success or failure) to logs/login.log
+ *
+ * @param string $status 'success' or 'failed'
+ * @param string $email Attempted email (can be empty)
+ * @param string $reason Failure reason or note (can be empty on success)
+ * @param string $source Controller/source identifier (e.g. 'Login', 'Main')
+ * @return void
+ */
+function log_login_attempt($status, $email, $reason, $source = ''){
+    if (!defined('LOGS')) {
+        return;
+    }
+    $logFile = LOGS . 'login.log';
+    $ip = isset($_SERVER['HTTP_X_FORWARDED_FOR']) ? $_SERVER['HTTP_X_FORWARDED_FOR'] : (isset($_SERVER['REMOTE_ADDR']) ? $_SERVER['REMOTE_ADDR'] : '');
+    $agent = isset($_SERVER['HTTP_USER_AGENT']) ? $_SERVER['HTTP_USER_AGENT'] : '';
+    $appVersion = function_exists('get') ? get('version', '') : '';
+
+    $entry = [
+        'timestamp' => date('Y-m-d H:i:s'),
+        'status' => $status,
+        'email' => $email,
+        'reason' => $reason,
+        'ip' => $ip,
+        'user_agent' => $agent,
+        'app_version' => $appVersion,
+        'source' => $source,
+    ];
+
+    $line = json_encode($entry) . "\n";
+    @file_put_contents($logFile, $line, FILE_APPEND | LOCK_EX);
+}
+
+/**
+ * Backwards-compatible wrapper for failed login attempts.
+ *
+ * @param string $email Attempted email (can be empty)
+ * @param string $reason Failure reason
+ * @param string $source Controller/source identifier (e.g. 'Login', 'Main')
+ * @return void
+ */
+function log_failed_login($email, $reason, $source = ''){
+    log_login_attempt('failed', $email, $reason, $source);
+}
+
+/**
+ * Convenience wrapper for successful login attempts.
+ *
+ * @param string $email Authenticated user email
+ * @param string $source Controller/source identifier (e.g. 'Login', 'Main')
+ * @param string $reason Optional note, defaults to 'Login success'
+ * @return void
+ */
+function log_success_login($email, $source = '', $reason = 'Login success'){
+    log_login_attempt('success', $email, $reason, $source);
+}
+
 class Data {
     static $post = null;
     static $array_errors = array();

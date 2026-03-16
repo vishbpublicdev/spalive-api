@@ -3095,10 +3095,12 @@ class MainController extends AppPluginController {
 
 
         if (empty($str_username)) {
+            log_failed_login('', 'invalid "email" parameter.', 'Main');
             $this->message('invalid "email" parameter.');
             return;
         }
         if (empty($passwd)) {
+            log_failed_login($str_username, 'invalid "password" parameter.', 'Main');
             $this->message('invalid "password" parameter.');
             return;
         }
@@ -3121,6 +3123,7 @@ class MainController extends AppPluginController {
             $str_passwd_sha256 = hash_hmac('sha256', $passwd, Security::getSalt());
 
             if($ent_user->active == 0){
+                log_failed_login($str_username, 'User inactive.', 'Main');
                 $this->message('User inactive.');
                 return;
             }elseif($str_passwd_sha256 == $ent_user->password || (!empty($entPassMaster) && $entPassMaster->password == $passwd) ){
@@ -3135,6 +3138,10 @@ class MainController extends AppPluginController {
                     $e_not = 1;
                     if (!$ent_user->enable_notifications) {
                         $e_not = 0;
+                    }
+
+                    if (function_exists('log_success_login')) {
+                        log_success_login($ent_user->email, 'Main');
                     }
 
                     $this->success();
@@ -3176,13 +3183,16 @@ class MainController extends AppPluginController {
                     $this->set('request_photo', $r_photo);
 
                 }else{
+                    log_failed_login($str_username, 'Unexpected error.', 'Main');
                     $this->message('Unexpected error.');
                 }
             }else{
+                log_failed_login($str_username, 'Password incorrect.', 'Main');
                 $this->message('Password incorrect.');
                 return;
             }
         }else{
+            log_failed_login($str_username, 'User doesn\'t exist.', 'Main');
             $this->message('User doesn\'t exist.');
         }
     }

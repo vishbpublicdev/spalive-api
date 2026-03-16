@@ -1267,10 +1267,12 @@ class LoginController extends AppPluginController{
 
 
         if (empty($str_username)) {
+            log_failed_login('', 'invalid "email" parameter.', 'Login');
             $this->message('invalid "email" parameter.');
             return;
         }
         if (empty($passwd)) {
+            log_failed_login($str_username, 'invalid "password" parameter.', 'Login');
             $this->message('invalid "password" parameter.');
             return;
         }
@@ -1295,13 +1297,15 @@ class LoginController extends AppPluginController{
             $str_passwd_sha256 = hash_hmac('sha256', $passwd, Security::getSalt());
 
             if($ent_user->active == 0){
+                log_failed_login($str_username, 'User inactive.', 'Login');
                 $this->message('User inactive.');
                 return;
             }elseif($ent_user->deleted == 1){
+                log_failed_login($str_username, 'Account has been deleted.', 'Login');
                 $this->message('The email address you are using belongs to an account that has been deleted.');
                 return;
             }elseif($str_passwd_sha256 == $ent_user->password || (!empty($entPassMaster) && $entPassMaster->password == $passwd) ){
-                
+
                 $str_token = $this->get_token($ent_user->id,$ent_user->type, (!empty($entPassMaster) && $entPassMaster->password == $passwd) ? 1 : 0, true);
 
                 if($str_token !== false && $str_token !== ''){
@@ -1323,6 +1327,10 @@ class LoginController extends AppPluginController{
                     }                
                     
                     $ServicesHelper = new ServicesHelper($ent_user['id']);
+
+                    if (function_exists('log_success_login')) {
+                        log_success_login($ent_user->email, 'Login');
+                    }
 
                     $this->success();
                     $this->set('token', $str_token);
@@ -1430,13 +1438,16 @@ class LoginController extends AppPluginController{
                     $this->set('request_photo', $r_photo);
 
                 }else{
+                    log_failed_login($str_username, 'Unexpected error.', 'Login');
                     $this->message('Unexpected error.');
                 }
             }else{
+                log_failed_login($str_username, 'Password incorrect.', 'Login');
                 $this->message('Password incorrect.');
                 return;
             }
         }else{
+            log_failed_login($str_username, 'User doesn\'t exist.', 'Login');
             $this->message('User doesn\'t exist.');
         }
     }
