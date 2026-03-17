@@ -36250,6 +36250,105 @@ class MainController extends AppPluginController {
         $this->success();
     }
 
+    /**
+     * Create or reuse a promo code (DataPromoCodes).  
+     */
+    public function create_promo_code() {
+        $this->loadModel('SpaLiveV1.DataPromoCodes');
+
+        // Simple API key authentication
+        $api_key = get('api_key', '');
+        $expected_api_key = Configure::read('App.external_api_key', '');
+        if (empty($expected_api_key) || $api_key !== $expected_api_key) {
+            $this->message('Invalid API key.');
+            $this->set('success', false);
+            return;
+        }
+
+        $code = strtoupper(trim(get('code', '')));
+        $category = strtoupper(trim(get('category', 'REGISTER')));
+        $type = strtoupper(trim(get('type', 'PERCENTAGE'))); // PERCENTAGE | AMOUNT
+        $discount = intval(get('discount', -1));
+        $active = intval(get('active', 1)) ? 1 : 0;
+
+        if ($code === '') {
+            $this->message('Code is required.');
+            $this->set('success', false);
+            return;
+        }
+        if (!in_array($type, ['PERCENTAGE', 'AMOUNT'])) {
+            $this->message('Invalid type. Use PERCENTAGE or AMOUNT.');
+            $this->set('success', false);
+            return;
+        }
+        if ($discount < 0) {
+            $this->message('Discount is required.');
+            $this->set('success', false);
+            return;
+        }
+        if ($type === 'PERCENTAGE' && $discount > 99) {
+            $this->message('Percentage discount must be between 0 and 99.');
+            $this->set('success', false);
+            return;
+        }
+
+        $existing = $this->DataPromoCodes->find()
+            ->where([
+                'DataPromoCodes.deleted' => 0,
+                'DataPromoCodes.code' => $code,
+            ])
+            ->first();
+
+        if (!empty($existing)) {
+            //$this->set('success', true);
+            $this->set('Message', "PRMOCODE exist");
+           /*  $this->set('promo_id', $existing->id);
+            $this->set('code', $existing->code);
+            $this->set('category', $existing->category);
+            $this->set('type', $existing->type);
+            $this->set('discount', $existing->discount);
+            $this->set('active', $existing->active); */
+            $this->success();
+            return;
+        }
+
+        $arr_new = [
+            'code' => $code,
+            'category' => $category,
+            'type' => $type,
+            'discount' => $discount,
+            'active' => $active,
+            //'deleted' => 0,
+            'used' => 0,
+            'created' => date('Y-m-d H:i:s'),
+            'short_description' => get('short_description', '') .' CREATED FROM PORTTOPAY' 
+        ];
+
+        $entity = $this->DataPromoCodes->newEntity($arr_new);
+        if ($entity->hasErrors()) {
+            $this->message('Promo validation failed: ' . json_encode($entity->getErrors()));
+            $this->set('success', false);
+            return;
+        }
+
+        $saved = $this->DataPromoCodes->save($entity);
+        if (!$saved) {
+            $this->message('Failed to create promo code.');
+            $this->set('success', false);
+            return;
+        }
+
+        $this->set('success', true);
+        $this->set('created', true);
+        $this->set('promo_id', $saved->id);
+        $this->set('code', $saved->code);
+        $this->set('category', $saved->category);
+        $this->set('type', $saved->type);
+        $this->set('discount', $saved->discount);
+        $this->set('active', $saved->active);
+        $this->success();
+    }
+
     public function add_external_payment_confirmation() {
         $this->loadModel('SpaLiveV1.SysUsers');
         $this->loadModel('SpaLiveV1.DataPayment');
@@ -36289,7 +36388,7 @@ class MainController extends AppPluginController {
         
         // Get course type - accept both 'type_course' (normal flow) or 'course_type' (direct value)
         $type_course = get('type_course', '');
-        $course_type = get('course_type', '');
+        //$course_type = get('course_type', '');
         
         // Map course name to payment type (same logic as payment_intent_course())
         $type_string = '';
@@ -36317,7 +36416,29 @@ class MainController extends AppPluginController {
             }
         } 
         
-        $subtotal = get('subtotal', $payment_amount); // Subtotal before discounts
+        // Subtotal before discounts (original course price).
+        $subtotal = get('subtotal', $payment_amount);
+
+       
+        $promo_code = strtoupper(get('promo_code', ''));
+        $promo_discount = 0;
+        if (!empty($promo_code)) {
+            // Use a concrete promo category that matches DataPromoCodes.category
+            $promo_category = 'REGISTER';
+            $total_after = $this->validateCode($promo_code, $subtotal, $promo_category);
+
+            if ($this->getParams('code_valid')) {
+                // Discount percentage already calculated by validateCode()
+                $promo_discount = $this->getParams('discount');
+                // Update final charged total to the discounted amount.
+                $payment_amount = $total_after;
+            } else {
+                // If code is invalid, stop the flow and return an error.
+                $this->message('Invalid promo code.');
+                $this->set('success', false);
+                return false;
+            }
+        }
 
         // Get training data
         $training_id = get('training_id', 0);
@@ -36347,7 +36468,7 @@ class MainController extends AppPluginController {
             return;
         }
 
-        if ($course_type) {
+        if (!$type_course) {
             $this->message('Course type is required.');
             $this->set('success', false);
             return;
@@ -36494,8 +36615,8 @@ class MainController extends AppPluginController {
                 'payment' => $charge_id,
                 'receipt' => $receipt_url,
                 'discount_credits' => 0,
-                'promo_discount' => 0,
-                'promo_code' => '',
+                'promo_discount' => $promo_discount,
+                'promo_code' => $promo_code,
                 'subtotal' => $subtotal,
                 'total' => $payment_amount,
                 'prod' => 1,
