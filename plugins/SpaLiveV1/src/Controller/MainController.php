@@ -36310,38 +36310,39 @@ class MainController extends AppPluginController {
             ->first();
 
         if (!empty($existing)) {
-            //$this->set('success', true);
-            $this->set('Message', "PRMOCODE exist");
-           /*  $this->set('promo_id', $existing->id);
-            $this->set('code', $existing->code);
-            $this->set('category', $existing->category);
-            $this->set('type', $existing->type);
-            $this->set('discount', $existing->discount);
-            $this->set('active', $existing->active); */
-            $this->success();
-            return;
+            // Edit existing promo code
+            $existing->category = $category;
+            $existing->type = $type;
+            $existing->discount = $discount;
+            $existing->active = $active;
+            $existing->short_description = get('short_description', $existing->short_description);
+
+            $saved = $this->DataPromoCodes->save($existing);
+            $this->message('Updated promo code successfully.');
+        } else {
+            // Create new promo code
+            $arr_new = [
+                'code' => $code,
+                'category' => $category,
+                'type' => $type,
+                'discount' => $discount,
+                'active' => $active,
+                'deleted' => 0,
+                'used' => 0,
+                'created' => date('Y-m-d H:i:s'),
+                'short_description' => get('short_description', '') . ' CREATED FROM PORTTOPAY'
+            ];
+
+            $entity = $this->DataPromoCodes->newEntity($arr_new);
+            if ($entity->hasErrors()) {
+                $this->message('Promo validation failed: ' . json_encode($entity->getErrors()));
+                $this->set('success', false);
+                return;
+            }
+
+            $saved = $this->DataPromoCodes->save($entity);
+            $this->message('Created promo code successfully.');
         }
-
-        $arr_new = [
-            'code' => $code,
-            'category' => $category,
-            'type' => $type,
-            'discount' => $discount,
-            'active' => $active,
-            //'deleted' => 0,
-            'used' => 0,
-            'created' => date('Y-m-d H:i:s'),
-            'short_description' => get('short_description', '') .' CREATED FROM PORTTOPAY' 
-        ];
-
-        $entity = $this->DataPromoCodes->newEntity($arr_new);
-        if ($entity->hasErrors()) {
-            $this->message('Promo validation failed: ' . json_encode($entity->getErrors()));
-            $this->set('success', false);
-            return;
-        }
-
-        $saved = $this->DataPromoCodes->save($entity);
         if (!$saved) {
             $this->message('Failed to create promo code.');
             $this->set('success', false);
@@ -36349,13 +36350,76 @@ class MainController extends AppPluginController {
         }
 
         $this->set('success', true);
-        $this->set('created', true);
+        $this->set('created', empty($existing));
         $this->set('promo_id', $saved->id);
         $this->set('code', $saved->code);
         $this->set('category', $saved->category);
         $this->set('type', $saved->type);
         $this->set('discount', $saved->discount);
         $this->set('active', $saved->active);
+        $this->success();
+    }
+
+    /**
+     * Soft-delete a promo code (DataPromoCodes).
+     *
+     * Auth:
+     * - api_key: must match Configure::read('App.external_api_key')
+     *
+     * Params (one of):
+     * - code: promo code string (preferred)
+     * - promo_id: numeric id of the promo
+     *
+     * Behavior:
+     * - Marks promo as deleted=1 and active=0 if found.
+     */
+    public function delete_promo_code() {
+        $this->loadModel('SpaLiveV1.DataPromoCodes');
+
+        // Simple API key authentication
+        $api_key = get('api_key', '');
+        $expected_api_key = Configure::read('App.external_api_key', '');
+        if (empty($expected_api_key) || $api_key !== $expected_api_key) {
+            $this->message('Invalid API key.');
+            $this->set('success', false);
+            return;
+        }
+
+        $code = strtoupper(trim(get('code', '')));
+        $promo_id = intval(get('promo_id', 0));
+
+        if ($code === '' && $promo_id <= 0) {
+            $this->message('Either code or promo_id is required.');
+            $this->set('success', false);
+            return;
+        }
+
+        $where = ['DataPromoCodes.deleted' => 0];
+        if ($code !== '') {
+            $where['DataPromoCodes.code'] = $code;
+        } else {
+            $where['DataPromoCodes.id'] = $promo_id;
+        }
+
+        $promo = $this->DataPromoCodes->find()->where($where)->first();
+        if (empty($promo)) {
+            $this->message('Promo code not found.');
+            $this->set('success', false);
+            return;
+        }
+
+        $promo->deleted = 1;
+        $promo->active = 0;
+
+        if (!$this->DataPromoCodes->save($promo)) {
+            $this->message('Failed to delete promo code.');
+            $this->set('success', false);
+            return;
+        }
+
+        $this->set('success', true);
+        $this->set('promo_id', $promo->id);
+        $this->set('code', $promo->code);
         $this->success();
     }
 
