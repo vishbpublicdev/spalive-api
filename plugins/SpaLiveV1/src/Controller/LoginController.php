@@ -31,7 +31,7 @@ use Twilio\Rest\Chat\V2\Service\UserList;
 
 class LoginController extends AppPluginController{
 
-    private $register_total = 79500;
+    private $register_total = 89500;
     private $training_advanced = 89500;
     private $level_3_fillers = 150000;//level 3 fillers 
     private $level_3_medical = 99500;//level 3 medical
@@ -4224,30 +4224,16 @@ class LoginController extends AppPluginController{
         $deferred_offer_id = isset($Partially->deferred_offers['basic']) && !empty($Partially->deferred_offers['basic']) ? $Partially->deferred_offers['basic'] : null;
         $this->set('installments_deferred', !empty($deferred_offer_id) ? true : false);
 
-        $this->set('title_option', 'Botulinum Toxin Injection Essentials: $' . $training_amount);
+        $this->set('title_option', 'Level ONE Cosmetic Neurotoxin Course: $' . $training_amount);
         $this->set('training_amount', $training_amount);
         $this->set('training_amount_cross', $training_amount);
         $this->set('training_amount_not_cross', $training_amount_not_cross);
         $this->set('stripe_fee', number_format($stripe_fee, 2, '.', ''));
         $this->set('total', number_format($total, 2, '.', ''));
-        $this->set('image', 'https://blog.myspalive.com/wp-content/uploads/2022/06/imagen_2022-06-16_135718409.png');
+        $this->set('image', 'https://qtrypzzcjebvfcihiynt.supabase.co/storage/v1/object/public/base44-prod/public/698b5fc6911059f60909a4d0/f853bc3a9_Screenshot2026-02-12at115610AM.png');
         $this->set('text', '
             <h3>Course Description:</h3>
-            <p>Join our one-day intensive workshop designed for both newcomers and seasoned professionals,  offering expert-led education that combines essential theory with practical, hands-on training in botulinum toxin injections.This foundational neurotoxin course covers up to 74 units of treatment from the midface up—targeting the most in-demand and profitable areas for aesthetic practice. You’ll learn precise assessment, mapping, and injection techniques for the upper-face regions where 80% of units are placed. Perfect for beginners and providers looking to build confidence, skill, and revenue from day one.</p>
-            
-            <h3>Morning Session: Theoretical Insights</h3>
-            <ul>
-                <li>Dive into facial anatomy, botulinum neurotoxins, preparation and storage, effective consultations, contraindications, and injection techniques.</li>
-                <li>Learn about new dosing strategies, including 1-4 units per site for the forehead and crow´s feet, and updated techniques for the glabella area.</li>
-            </ul>
-            
-            <h3>Afternoon Session: Practical Application</h3>
-            <ul>
-                <li>Engage in hands-on practice with peer-to-peer simulations under the guidance of master injectors.</li>
-                <li>Master new markup techniques and receive personalized feedback to ensure proficiency in delivering treatments.</li>
-            </ul>
-            
-            <p>This workshop is perfect for anyone aiming to master botulinum toxin injections foundational skills and latest advancements in a condensed format. Enhance your expertise and confidence in aesthetic medicine with our focused, expert-led training.</p>');
+            <p>THE FUNDAMENTALS OF INJECTING BOTOX & OTHER BOTULINUM NEUROTOXINS + HANDS-ON TRAINING (FOREHEAD AND CROWS FEET) In this full-day course, participants will begin instruction with a didactic presentation from one a highly skilled and experienced injectors. The presentation will cover facial anatomy, the types of neurotoxins available, how to draw up and store product, give correct and thorough consultations, contraindications, injection techniques, and more! After a brief intermission for lunch, students will then begin the hands-on portion of the lesson. Everyone will be paired up to simulate injector-client interactions. Trainers will ensure that all students master the skills necessary for an effective appointment. Master injectors will double-check that everyone is marked up correctly and supervise the treatment performed.</p>');
         $this->set('seemore', 'https://blog.myspalive.com/certified-schools');
         //iv Therapy
         $this->set('title_optionIV', 'Apply to be IV Therapist');
