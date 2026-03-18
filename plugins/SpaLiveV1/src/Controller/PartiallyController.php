@@ -149,21 +149,27 @@ class PartiallyController extends AppPluginController {
 
             if($course == 'BASIC COURSE'){
                 $total = $this->basic_course_price;
+                $course_fetch_name = 'Level ONE Cosmetic Neurotoxin Course';
                 $offer_key = 'basic';
             }else if($course == 'ADVANCED COURSE'){
                 $total = $this->advanced_course_price;
+                $course_fetch_name = 'ADVANCED COURSE';
                 $offer_key = 'advanced';
             }else if($course == 'WEIGHT LOSS'){
                 $total = $this->weight_loss_with_partially;
+                $course_fetch_name = 'WEIGHT LOSS';
                 $offer_key = 'elite';
             }else if($course == 'LEVEL 1-1 NEUROTOXINS'){
                 $total = $this->level_1_to_1;
+                $course_fetch_name = 'LEVEL 1-1 NEUROTOXINS';
                 $offer_key = 'elite';
             }else if($course == 'FILLERS COURSE'){
                 $total = $this->level_3_fillers;
+                $course_fetch_name = 'FILLERS COURSE';
                 $offer_key = 'fillers';
             }else if($course == 'MEDICAL COURSE'){
                 $course = 'ADVANCED TECHNIQUES MEDICAL';
+                $course_fetch_name = 'ADVANCED TECHNIQUES MEDICAL';
                 $total = $this->level_3_medical;
                 $offer_key = 'level_3';
             }
@@ -202,7 +208,7 @@ class PartiallyController extends AppPluginController {
                 $metadata = [
                     'offer' => $offer_id,
                     'amount' => ($total / 100),
-                    'meta[description]' => $course,
+                    'meta[description]' => $course_fetch_name,
                     'meta[payment_uid]' => $uid, 
                     'meta[totalamount]' => $total, 
                     'referral_source' => 'shared_link',
@@ -907,7 +913,7 @@ class PartiallyController extends AppPluginController {
                 $total = $this->basic_course_price;
                 $details["products"] = [
                     array(
-                        "name" => "Basic Course",
+                        "name" => "Level ONE Cosmetic Neurotoxin Course",
                         "price" => $this->basic_course_price,
                         "qty" => 1
                     )

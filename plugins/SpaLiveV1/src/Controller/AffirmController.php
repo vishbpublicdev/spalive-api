@@ -564,7 +564,7 @@ class AffirmController extends AppPluginController {
             if($course == 'BASIC COURSE'){
                 $total = $payment->subtotal;
                 $products[] = array(
-                    'name' => 'Basic Course',
+                    'name' => 'Level ONE Cosmetic Neurotoxin Course',
                     'uid' => 'basic-course',
                     'price' => $payment->subtotal,
                     'qty' => 1
