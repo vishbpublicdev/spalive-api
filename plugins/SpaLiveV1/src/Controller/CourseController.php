@@ -1006,19 +1006,19 @@ class CourseController extends AppPluginController {
                 $data = array(
                     [
                         'title' => 'MySpaLive video',
-                        'url' => 'https://blog.myspalive.com/myspa.mp4',
+                        'url' => Configure::read('App.wordpress_domain') . '/myspa.mp4',
                         'type' => 'video'
                     ],
                     /* [
                         'title' => 'Ideals of Beauty and Methods of Body Modification',
                         'url' =>
-                            'https://blog.myspalive.com/wp-content/uploads/2022/08/Ideals-of-Beauty-and-Methods-of-Body-Modification.ppt',
+                            Configure::read('App.wordpress_domain') . '/wp-content/uploads/2022/08/Ideals-of-Beauty-and-Methods-of-Body-Modification.ppt',
                         'type' => 'download'
                     ],
                     [
                         'title' => 'Ordering and Storage Guide With Pi',
                         'url' =>
-                            'https://blog.myspalive.com/wp-content/uploads/2022/08/ordering_and_storage_guide_with_pi.pdf',
+                            Configure::read('App.wordpress_domain') . '/wp-content/uploads/2022/08/ordering_and_storage_guide_with_pi.pdf',
                         'type' => 'pdf'
                     ],
                     [
@@ -1029,7 +1029,7 @@ class CourseController extends AppPluginController {
                     ], */
                     [
                         'title' => 'How to use the App',
-                        'url' => 'https://blog.myspalive.com/wp-content/uploads/howtouse.mp4',
+                        'url' => Configure::read('App.wordpress_domain') . '/wp-content/uploads/howtouse.mp4',
                         'type' => 'video'
                     ]
                 );
@@ -1359,24 +1359,24 @@ class CourseController extends AppPluginController {
                         'data' => array(
                             [
                                 'title' => 'MySpaLive video',
-                                'url' => 'https://blog.myspalive.com/myspa.mp4',
+                                'url' => Configure::read('App.wordpress_domain') . '/myspa.mp4',
                                 'type' => 'video'
                             ],
                             [
                                 'title' => 'Glossary of Terms for Neurotoxin Injection Training',
                                 'url' =>
-                                    'https://blog.myspalive.com/wp-content/uploads/Glossary_of_Terms_for_Neurotoxin_Injection_Training.pdf',
+                                    Configure::read('App.wordpress_domain') . '/wp-content/uploads/Glossary_of_Terms_for_Neurotoxin_Injection_Training.pdf',
                                 'type' => 'pdf'
                             ],
                             [
                                 'title' => 'MySpaLive Level One Pre-Study Guide',
                                 'url' =>
-                                    'https://blog.myspalive.com/wp-content/uploads/MySpaLive_Level_One_Pre_Study_Guide.pdf',
+                                    Configure::read('App.wordpress_domain') . '/wp-content/uploads/MySpaLive_Level_One_Pre_Study_Guide.pdf',
                                 'type' => 'pdf'
                             ],
                             [
                                 'title' => 'How to use the App',
-                                'url' => 'https://blog.myspalive.com/wp-content/uploads/howtouse.mp4',
+                                'url' => Configure::read('App.wordpress_domain') . '/wp-content/uploads/howtouse.mp4',
                                 'type' => 'video'
                             ]
                         ),
@@ -1526,12 +1526,12 @@ class CourseController extends AppPluginController {
                         'data' => array(
                             [
                                 'title' => 'MySpaLive video',
-                                'url' => 'https://blog.myspalive.com/myspa.mp4',
+                                'url' => Configure::read('App.wordpress_domain') . '/myspa.mp4',
                                 'type' => 'video'
                             ],
                             [
                                 'title' => 'How to use the App',
-                                'url' => 'https://blog.myspalive.com/wp-content/uploads/howtouse.mp4',
+                                'url' => Configure::read('App.wordpress_domain') . '/wp-content/uploads/howtouse.mp4',
                                 'type' => 'video'
                             ]
                         ),
@@ -1746,24 +1746,24 @@ class CourseController extends AppPluginController {
                             'data' => array(
                                 [
                                     'title' => 'MySpaLive video',
-                                    'url' => 'https://blog.myspalive.com/myspa.mp4',
+                                    'url' => Configure::read('App.wordpress_domain') . '/myspa.mp4',
                                     'type' => 'video'
                                 ],
                                 [
                                     'title' => 'Glossary of Terms for Neurotoxin Injection Training',
                                     'url' =>
-                                        'https://blog.myspalive.com/wp-content/uploads/Glossary_of_Terms_for_Neurotoxin_Injection_Training.pdf',
+                                        Configure::read('App.wordpress_domain') . '/wp-content/uploads/Glossary_of_Terms_for_Neurotoxin_Injection_Training.pdf',
                                     'type' => 'pdf'
                                 ],
                                 [
                                     'title' => 'MySpaLive Level One Pre-Study Guide',
                                     'url' =>
-                                        'https://blog.myspalive.com/wp-content/uploads/MySpaLive_Level_One_Pre_Study_Guide.pdf',
+                                        Configure::read('App.wordpress_domain') . '/wp-content/uploads/MySpaLive_Level_One_Pre_Study_Guide.pdf',
                                     'type' => 'pdf'
                                 ],
                                 [
                                     'title' => 'How to use the App',
-                                    'url' => 'https://blog.myspalive.com/wp-content/uploads/howtouse.mp4',
+                                    'url' => Configure::read('App.wordpress_domain') . '/wp-content/uploads/howtouse.mp4',
                                     'type' => 'video'
                                 ]
                             ),
@@ -1827,12 +1827,12 @@ class CourseController extends AppPluginController {
                                 'data' => array(
                                     [
                                         'title' => 'MySpaLive video',
-                                        'url' => 'https://blog.myspalive.com/myspa.mp4',
+                                        'url' => Configure::read('App.wordpress_domain') . '/myspa.mp4',
                                         'type' => 'video'
                                     ],
                                     [
                                         'title' => 'How to use the App',
-                                        'url' => 'https://blog.myspalive.com/wp-content/uploads/howtouse.mp4',
+                                        'url' => Configure::read('App.wordpress_domain') . '/wp-content/uploads/howtouse.mp4',
                                         'type' => 'video'
                                     ]
                                 ),
@@ -2243,24 +2243,22 @@ class CourseController extends AppPluginController {
                         'data' => array(
                             [
                                 'title' => 'MySpaLive video',
-                                'url' => 'https://blog.myspalive.com/myspa.mp4',
+                                'url' => Configure::read('App.wordpress_domain') . '/myspa.mp4',
                                 'type' => 'video'
                             ],
                             [
                                 'title' => 'Glossary of Terms for Neurotoxin Injection Training',
-                                'url' =>
-                                    'https://blog.myspalive.com/wp-content/uploads/Glossary_of_Terms_for_Neurotoxin_Injection_Training.pdf',
+                                'url' => Configure::read('App.wordpress_domain') . '/wp-content/uploads/Glossary_of_Terms_for_Neurotoxin_Injection_Training.pdf',
                                 'type' => 'pdf'
                             ],
                             [
                                 'title' => 'MySpaLive Level One Pre-Study Guide',
-                                'url' =>
-                                    'https://blog.myspalive.com/wp-content/uploads/MySpaLive_Level_One_Pre_Study_Guide.pdf',
+                                'url' => Configure::read('App.wordpress_domain') . '/wp-content/uploads/MySpaLive_Level_One_Pre_Study_Guide.pdf',
                                 'type' => 'pdf'
                             ],
                             [
                                 'title' => 'How to use the App',
-                                'url' => 'https://blog.myspalive.com/wp-content/uploads/howtouse.mp4',
+                                'url' => Configure::read('App.wordpress_domain') . '/wp-content/uploads/howtouse.mp4',
                                 'type' => 'video'
                             ]
                         ),
@@ -2293,24 +2291,22 @@ class CourseController extends AppPluginController {
                         'data' => array(
                             [
                                 'title' => 'MySpaLive video',
-                                'url' => 'https://blog.myspalive.com/myspa.mp4',
+                                'url' => Configure::read('App.wordpress_domain') . '/myspa.mp4',
                                 'type' => 'video'
                             ],
                             [
                                 'title' => 'Glossary of Terms for Neurotoxin Injection Training',
-                                'url' =>
-                                    'https://blog.myspalive.com/wp-content/uploads/Glossary_of_Terms_for_Neurotoxin_Injection_Training.pdf',
+                                'url' => Configure::read('App.wordpress_domain') . '/wp-content/uploads/Glossary_of_Terms_for_Neurotoxin_Injection_Training.pdf',
                                 'type' => 'pdf'
                             ],
                             [
                                 'title' => 'MySpaLive Level One Pre-Study Guide',
-                                'url' =>
-                                    'https://blog.myspalive.com/wp-content/uploads/MySpaLive_Level_One_Pre_Study_Guide.pdf',
+                                'url' => Configure::read('App.wordpress_domain') . '/wp-content/uploads/MySpaLive_Level_One_Pre_Study_Guide.pdf',
                                 'type' => 'pdf'
                             ],
                             [
                                 'title' => 'How to use the App',
-                                'url' => 'https://blog.myspalive.com/wp-content/uploads/howtouse.mp4',
+                                'url' => Configure::read('App.wordpress_domain') . '/wp-content/uploads/howtouse.mp4',
                                 'type' => 'video'
                             ]
                         ),
@@ -2545,12 +2541,12 @@ class CourseController extends AppPluginController {
                         'data' => array(
                             [
                                 'title' => 'MySpaLive video',
-                                'url' => 'https://blog.myspalive.com/myspa.mp4',
+                                'url' => Configure::read('App.wordpress_domain') . '/myspa.mp4',
                                 'type' => 'video'
                             ],
                             [
                                 'title' => 'How to use the App',
-                                'url' => 'https://blog.myspalive.com/wp-content/uploads/howtouse.mp4',
+                                'url' => Configure::read('App.wordpress_domain') . '/wp-content/uploads/howtouse.mp4',
                                 'type' => 'video'
                             ]
                         ),
@@ -2582,12 +2578,12 @@ class CourseController extends AppPluginController {
                         'data' => array(
                             [
                                 'title' => 'MySpaLive video',
-                                'url' => 'https://blog.myspalive.com/myspa.mp4',
+                                'url' => Configure::read('App.wordpress_domain') . '/myspa.mp4',
                                 'type' => 'video'
                             ],
                             [
                                 'title' => 'How to use the App',
-                                'url' => 'https://blog.myspalive.com/wp-content/uploads/howtouse.mp4',
+                                'url' => Configure::read('App.wordpress_domain') . '/wp-content/uploads/howtouse.mp4',
                                 'type' => 'video'
                             ]
                         ),
@@ -2686,24 +2682,24 @@ class CourseController extends AppPluginController {
                             'data' => array(
                                 [
                                     'title' => 'MySpaLive video',
-                                    'url' => 'https://blog.myspalive.com/myspa.mp4',
+                                    'url' => Configure::read('App.wordpress_domain') . '/myspa.mp4',
                                     'type' => 'video'
                                 ],
                                 [
                                     'title' => 'Glossary of Terms for Neurotoxin Injection Training',
                                     'url' =>
-                                        'https://blog.myspalive.com/wp-content/uploads/Glossary_of_Terms_for_Neurotoxin_Injection_Training.pdf',
+                                        Configure::read('App.wordpress_domain') . '/wp-content/uploads/Glossary_of_Terms_for_Neurotoxin_Injection_Training.pdf',
                                     'type' => 'pdf'
                                 ],
                                 [
                                     'title' => 'MySpaLive Level One Pre-Study Guide',
                                     'url' =>
-                                        'https://blog.myspalive.com/wp-content/uploads/MySpaLive_Level_One_Pre_Study_Guide.pdf',
+                                        Configure::read('App.wordpress_domain') . '/wp-content/uploads/MySpaLive_Level_One_Pre_Study_Guide.pdf',
                                     'type' => 'pdf'
                                 ],
                                 [
                                     'title' => 'How to use the App',
-                                    'url' => 'https://blog.myspalive.com/wp-content/uploads/howtouse.mp4',
+                                    'url' => Configure::read('App.wordpress_domain') . '/wp-content/uploads/howtouse.mp4',
                                     'type' => 'video'
                                 ]
                             ),
@@ -2768,12 +2764,12 @@ class CourseController extends AppPluginController {
                                 'data' => array(
                                     [
                                         'title' => 'MySpaLive video',
-                                        'url' => 'https://blog.myspalive.com/myspa.mp4',
+                                        'url' => Configure::read('App.wordpress_domain') . '/myspa.mp4',
                                         'type' => 'video'
                                     ],
                                     [
                                         'title' => 'How to use the App',
-                                        'url' => 'https://blog.myspalive.com/wp-content/uploads/howtouse.mp4',
+                                        'url' => Configure::read('App.wordpress_domain') . '/wp-content/uploads/howtouse.mp4',
                                         'type' => 'video'
                                     ]
                                 ),

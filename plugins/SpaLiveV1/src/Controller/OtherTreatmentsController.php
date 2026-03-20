@@ -29,7 +29,7 @@ class OtherTreatmentsController extends AppPluginController{
 
     private $total = 3900;
     private $paymente_gfe = 1800;
-    private $register_total = 79500;
+    private $register_total = 89500;
     private $register_refund = 3500;
     private $shipping_cost = 1000;
     private $shipping_cost_both = 3000;
