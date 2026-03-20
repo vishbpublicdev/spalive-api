@@ -103,7 +103,8 @@
 	        $this->set('pageContent', $array_data);
 	        $this->set('get_in_touch', array('email' => 'patientrelations@myspalive.com', 'phone' => '4302054192', 'phone_label' => '430-205-4192'));
 			$this->set('offer_patients', array(
-				'text1' => "Get $50 Off\nYour First Treatment!",
+				'text1' => "", 
+				//'text1' => "Get $50 Off\nYour First Treatment!",
 				'text2' => '',
 				'text3' => "$200 minimum treatment cost applies.\nLimited-time offer.\nOnly available for on-demand treatments in Texas.",
 			));
