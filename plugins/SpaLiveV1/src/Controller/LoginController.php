@@ -4224,7 +4224,7 @@ class LoginController extends AppPluginController{
         $deferred_offer_id = isset($Partially->deferred_offers['basic']) && !empty($Partially->deferred_offers['basic']) ? $Partially->deferred_offers['basic'] : null;
         $this->set('installments_deferred', !empty($deferred_offer_id) ? true : false);
 
-        $this->set('title_option', 'Level ONE Cosmetic Neurotoxin Course: $' . $training_amount);
+        $this->set('title_option', 'Neurotoxin Course - Level 1: $' . $training_amount);
         $this->set('training_amount', $training_amount);
         $this->set('training_amount_cross', $training_amount);
         $this->set('training_amount_not_cross', $training_amount_not_cross);
