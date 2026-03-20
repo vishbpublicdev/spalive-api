@@ -149,7 +149,7 @@ class PartiallyController extends AppPluginController {
 
             if($course == 'BASIC COURSE'){
                 $total = $this->basic_course_price;
-                $course_fetch_name = 'Level ONE Cosmetic Neurotoxin Course';
+                $course_fetch_name = 'Neurotoxin Course - Level 1';
                 $offer_key = 'basic';
             }else if($course == 'ADVANCED COURSE'){
                 $total = $this->advanced_course_price;
@@ -913,7 +913,7 @@ class PartiallyController extends AppPluginController {
                 $total = $this->basic_course_price;
                 $details["products"] = [
                     array(
-                        "name" => "Level ONE Cosmetic Neurotoxin Course",
+                        "name" => "Neurotoxin Course - Level 1",
                         "price" => $this->basic_course_price,
                         "qty" => 1
                     )
