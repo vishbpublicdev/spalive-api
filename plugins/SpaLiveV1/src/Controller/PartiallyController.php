@@ -1102,11 +1102,18 @@ class PartiallyController extends AppPluginController {
             $is_deferred_payment_succeeded = isset($metadata['deferred']) && $event == 'payment_succeeded';
             $where_conditions = [
                 "DataPayment.uid" => $payment_uid,
+                "DataPayment.payment_platform" => "partially",
             ];
             if ($is_deferred_payment_succeeded) {
                 $where_conditions["DataPayment.is_visible"] = 1;
-            }else{
-                $where_conditions["DataPayment.is_visible"] = 0;
+            } else {
+                // For plan_opened: find payment that hasn't been processed yet.
+                // Use payment empty check instead of is_visible - in dev mode payments are
+                // created with is_visible=1, so is_visible=0 would never match.
+                $where_conditions['OR'] = [
+                    ['DataPayment.payment IS' => null],
+                    ['DataPayment.payment' => ''],
+                ];
             }
             
             $ent_payment = $this->DataPayment->find()->where($where_conditions)->first();
