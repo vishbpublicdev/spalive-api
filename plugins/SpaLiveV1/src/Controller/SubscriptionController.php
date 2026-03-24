@@ -415,6 +415,225 @@ class SubscriptionController extends AppPluginController {
         $this->set('has_both_subscriptions', false);
         $this->success();
     }
+
+    /**
+     * API: Manually create a subscription for any user.
+     * Call with: action=Subscription____create_manual_subscription
+     * Params: user_id (or uid), subscription_type; optional: amount, service, monthly, add_payment,
+     * payment_notes, stripe_payment_id (or payment_id), charge_id, receipt_id (or receipt_url)
+     */
+    public function create_manual_subscription()
+    {
+        $this->loadModel('SpaLiveV1.DataSubscriptions');
+        $this->loadModel('SpaLiveV1.DataSubscriptionPayments');
+        $this->loadModel('SpaLiveV1.SysUsers');
+        $this->loadModel('SpaLiveV1.SysUserAdmin');
+
+        $subscriptionTypes = [
+            'SUBSCRIPTIONMSL', 'SUBSCRIPTIONMD', 'SUBSCRIPTIONMSLIVT', 'SUBSCRIPTIONMDIVT',
+            'SUBSCRIPTIONMSLFILLERS', 'SUBSCRIPTIONMDFILLERS', 'TOXANDFILLERSUBSCRIPTIONPACKAGE', 'FILLERONLYSUBSCRIPTIONPACKAGE', 'CLASSROOMPACKAGENEUROTOXIN'
+        ];
+        $defaultAmounts = [
+            'SUBSCRIPTIONMSL' => 9900,
+            'SUBSCRIPTIONMD' => 17900,
+            'SUBSCRIPTIONMSLIVT' => 3995,
+            'SUBSCRIPTIONMDIVT' => 17900,
+            'SUBSCRIPTIONMSLFILLERS' => 7500,
+            'SUBSCRIPTIONMDFILLERS' => 7500,
+            'TOXANDFILLERSUBSCRIPTIONPACKAGE' => 148000,
+            'FILLERONLYSUBSCRIPTIONPACKAGE' => 95500,
+            'CLASSROOMPACKAGENEUROTOXIN' => 79500
+        ];
+
+        $userInput = get('user_id', '') ?: get('uid', '');
+        $subscriptionType = strtoupper(get('subscription_type', ''));
+        $amountParam = get('amount', '');
+        $serviceOption = get('service', '');
+        $monthly = get('monthly', '1');
+        $addPayment = get('add_payment', '1');
+        $paymentNotes = get('payment_notes', '');
+        if ($paymentNotes === false || $paymentNotes === '') {
+            $paymentNotes = '';
+        } else {
+            $paymentNotes = (string)$paymentNotes;
+        }
+        $extPaymentId = get('stripe_payment_id', '') ?: get('payment_id', '');
+        if ($extPaymentId === false) {
+            $extPaymentId = '';
+        } else {
+            $extPaymentId = (string)$extPaymentId;
+        }
+        $extChargeId = get('charge_id', '');
+        if ($extChargeId === false) {
+            $extChargeId = '';
+        } else {
+            $extChargeId = (string)$extChargeId;
+        }
+        $extReceiptId = get('receipt_id', '') ?: get('receipt_url', '');
+        if ($extReceiptId === false) {
+            $extReceiptId = '';
+        } else {
+            $extReceiptId = (string)$extReceiptId;
+        }
+
+        if (empty($userInput)) {
+            $this->message('user_id or uid is required.');
+            return;
+        }
+
+        if (empty($subscriptionType) || !in_array($subscriptionType, $subscriptionTypes, true)) {
+            $this->message('subscription_type is required. Valid: ' . implode(', ', $subscriptionTypes));
+            return;
+        }
+
+        if (!in_array((string)$monthly, ['1', '3', '12'], true)) {
+            $this->message('monthly must be 1, 3, or 12.');
+            return;
+        }
+
+        $user = null;
+        if (is_numeric($userInput)) {
+            $user = $this->SysUsers->find()->where(['SysUsers.id' => (int)$userInput])->first();
+        } else {
+            $user = $this->SysUsers->find()->where(['SysUsers.uid' => $userInput])->first();
+        }
+
+        if (!$user) {
+            $this->message('User not found.');
+            return;
+        }
+
+        $userId = $user->id;
+        $userState = $user->state ?? 0;
+
+        $mainService = 'NEUROTOXINS';
+        if ($serviceOption) {
+            $s = strtoupper(str_replace('_', ' ', $serviceOption));
+            if ($s === 'IV THERAPY' || $s === 'IVTHERAPY') {
+                $mainService = 'IV THERAPY';
+            } elseif (in_array($s, ['NEUROTOXINS', 'FILLERS'], true)) {
+                $mainService = $s;
+            }
+        } elseif (strpos($subscriptionType, 'FILLERS') !== false) {
+            $mainService = 'FILLERS';
+        } elseif (strpos($subscriptionType, 'IVT') !== false) {
+            $mainService = 'IV THERAPY';
+        }
+
+        $amount = $amountParam !== '' && $amountParam !== false
+            ? (int)$amountParam
+            : ($defaultAmounts[$subscriptionType] ?? 17900);
+
+        $paymentDetailsJson = json_encode([$mainService => $amount]);
+        $now = date('Y-m-d H:i:s');
+
+        $subEntity = $this->DataSubscriptions->newEntity([
+            'uid' => Text::uuid(),
+            'event' => 'manual_subscription_api',
+            'payload' => '',
+            'user_id' => $userId,
+            'request_id' => '',
+            'data_object_id' => '',
+            'customer_id' => '',
+            'payment_method' => 'MANUAL',
+            'subscription_type' => $subscriptionType,
+            'promo_code' => '',
+            'subtotal' => $amount,
+            'total' => $amount,
+            'status' => 'ACTIVE',
+            'deleted' => 0,
+            'created' => $now,
+            'agreement_id' => 0,
+            'comments' => '',
+            'main_service' => $mainService,
+            'addons_services' => '',
+            'payment_details' => $paymentDetailsJson,
+            'state' => $userState,
+            'monthly' => (string)$monthly,
+            'other_school' => 0,
+        ]);
+
+        if ($subEntity->hasErrors()) {
+            $this->message('Validation error: ' . json_encode($subEntity->getErrors()));
+            return;
+        }
+
+        $saved = $this->DataSubscriptions->save($subEntity);
+
+        if (!$saved) {
+            $this->message('Failed to save subscription.');
+            return;
+        }
+
+        $this->set('subscription_id', $saved->id);
+
+        if ($addPayment && $addPayment !== '0' && $addPayment !== false) {
+            // Same as insert_subscription_by_values / save_subscription after Stripe: assign MD when missing
+            if ($subscriptionType === 'SUBSCRIPTIONMD' || $subscriptionType === 'SUBSCRIPTIONMDIVT' || $subscriptionType === 'SUBSCRIPTIONMDFILLERS') {
+                $injector = $this->SysUsers->find()
+                    ->where(['SysUsers.id' => $userId, 'SysUsers.md_id' => 0])
+                    ->first();
+                if (!empty($injector)) {
+                    $mdAssigned = $this->SysUserAdmin->getAssignedDoctorInjector($userId);
+                    $this->SysUsers->updateAll(
+                        ['md_id' => $mdAssigned],
+                        ['id' => $userId]
+                    );
+                }
+            }
+
+            $userFresh = $this->SysUsers->get($userId);
+            $mdIdPayment = (int)($userFresh->md_id ?? 0);
+
+            // Mirrors save_subscription successful charge block (DataSubscriptionPayments row).
+            // Optional params record external/Stripe or office payment references (check, wire ref, etc.).
+            $payNotes = $paymentNotes;
+            if ($payNotes === '' && ($extPaymentId !== '' || $extChargeId !== '' || $extReceiptId !== '')) {
+                $payNotes = 'Manual API';
+            }
+
+            $payEntity = $this->DataSubscriptionPayments->newEntity([
+                'uid' => Text::uuid(),
+                'user_id' => $userId,
+                'subscription_id' => $saved->id,
+                'total' => $amount,
+                'payment_id' => $extPaymentId,
+                'charge_id' => $extChargeId,
+                'receipt_id' => $extReceiptId,
+                'error' => '',
+                'status' => 'DONE',
+                'notes' => $payNotes,
+                'created' => $now,
+                'deleted' => 0,
+                'payment_type' => 'FULL',
+                'payment_description' => $subscriptionType,
+                'main_service' => $mainService,
+                'addons_services' => '',
+                'payment_details' => $paymentDetailsJson,
+                'state' => $userState,
+                'md_id' => $mdIdPayment,
+            ]);
+
+            if ($payEntity->hasErrors()) {
+                $this->message('Subscription saved but payment validation failed: ' . json_encode($payEntity->getErrors()));
+                return;
+            }
+
+            $savedPayment = $this->DataSubscriptionPayments->save($payEntity);
+            if (!$savedPayment) {
+                $this->message('Subscription saved but payment row could not be saved.');
+                return;
+            }
+
+            $this->set('payment_id', $savedPayment->id);
+        }
+
+        if (!empty($user->uid)) {
+            shell_exec(env('COMMAND_PATH', '') . ' subscriptions ' . $user->uid . ' > /dev/null 2>&1 &');
+        }
+
+        $this->success();
+    }
     
     public function save_subscription(){
         $this->loadModel('SpaLiveV1.DataSubscriptions');
@@ -6231,6 +6450,8 @@ class SubscriptionController extends AppPluginController {
             ->limit($limit)
             ->all();                
 
+
+        //subscription name set manually
         foreach($ent_subs_payment as $ent_payment){
 
             $title = stripos($ent_payment['DataSubscriptions']['subscription_type'], 'MD') !== false 
