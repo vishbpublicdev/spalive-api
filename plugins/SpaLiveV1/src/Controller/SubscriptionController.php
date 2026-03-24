@@ -419,7 +419,8 @@ class SubscriptionController extends AppPluginController {
     /**
      * API: Manually create a subscription for any user.
      * Call with: action=Subscription____create_manual_subscription
-     * Params: user_id (or uid), subscription_type; optional: amount, service, monthly, add_payment
+     * Params: user_id (or uid), subscription_type; optional: amount, service, monthly, add_payment,
+     * payment_notes, stripe_payment_id (or payment_id), charge_id, receipt_id (or receipt_url)
      */
     public function create_manual_subscription()
     {
@@ -430,7 +431,7 @@ class SubscriptionController extends AppPluginController {
 
         $subscriptionTypes = [
             'SUBSCRIPTIONMSL', 'SUBSCRIPTIONMD', 'SUBSCRIPTIONMSLIVT', 'SUBSCRIPTIONMDIVT',
-            'SUBSCRIPTIONMSLFILLERS', 'SUBSCRIPTIONMDFILLERS',
+            'SUBSCRIPTIONMSLFILLERS', 'SUBSCRIPTIONMDFILLERS', 'TOXANDFILLERSUBSCRIPTIONPACKAGE', 'FILLERONLYSUBSCRIPTIONPACKAGE', 'CLASSROOMPACKAGENEUROTOXIN'
         ];
         $defaultAmounts = [
             'SUBSCRIPTIONMSL' => 9900,
@@ -439,6 +440,9 @@ class SubscriptionController extends AppPluginController {
             'SUBSCRIPTIONMDIVT' => 17900,
             'SUBSCRIPTIONMSLFILLERS' => 7500,
             'SUBSCRIPTIONMDFILLERS' => 7500,
+            'TOXANDFILLERSUBSCRIPTIONPACKAGE' => 148000,
+            'FILLERONLYSUBSCRIPTIONPACKAGE' => 95500,
+            'CLASSROOMPACKAGENEUROTOXIN' => 79500
         ];
 
         $userInput = get('user_id', '') ?: get('uid', '');
@@ -447,6 +451,30 @@ class SubscriptionController extends AppPluginController {
         $serviceOption = get('service', '');
         $monthly = get('monthly', '1');
         $addPayment = get('add_payment', '1');
+        $paymentNotes = get('payment_notes', '');
+        if ($paymentNotes === false || $paymentNotes === '') {
+            $paymentNotes = '';
+        } else {
+            $paymentNotes = (string)$paymentNotes;
+        }
+        $extPaymentId = get('stripe_payment_id', '') ?: get('payment_id', '');
+        if ($extPaymentId === false) {
+            $extPaymentId = '';
+        } else {
+            $extPaymentId = (string)$extPaymentId;
+        }
+        $extChargeId = get('charge_id', '');
+        if ($extChargeId === false) {
+            $extChargeId = '';
+        } else {
+            $extChargeId = (string)$extChargeId;
+        }
+        $extReceiptId = get('receipt_id', '') ?: get('receipt_url', '');
+        if ($extReceiptId === false) {
+            $extReceiptId = '';
+        } else {
+            $extReceiptId = (string)$extReceiptId;
+        }
 
         if (empty($userInput)) {
             $this->message('user_id or uid is required.');
@@ -496,7 +524,8 @@ class SubscriptionController extends AppPluginController {
             ? (int)$amountParam
             : ($defaultAmounts[$subscriptionType] ?? 17900);
 
-        $paymentDetails = json_encode([$mainService => $amount]);
+        $paymentDetailsJson = json_encode([$mainService => $amount]);
+        $now = date('Y-m-d H:i:s');
 
         $subEntity = $this->DataSubscriptions->newEntity([
             'uid' => Text::uuid(),
@@ -513,10 +542,12 @@ class SubscriptionController extends AppPluginController {
             'total' => $amount,
             'status' => 'ACTIVE',
             'deleted' => 0,
+            'created' => $now,
             'agreement_id' => 0,
+            'comments' => '',
             'main_service' => $mainService,
             'addons_services' => '',
-            'payment_details' => $paymentDetails,
+            'payment_details' => $paymentDetailsJson,
             'state' => $userState,
             'monthly' => (string)$monthly,
             'other_school' => 0,
@@ -537,10 +568,28 @@ class SubscriptionController extends AppPluginController {
         $this->set('subscription_id', $saved->id);
 
         if ($addPayment && $addPayment !== '0' && $addPayment !== false) {
-            $mdId = 0;
-            if (strpos($subscriptionType, 'MD') !== false) {
-                $assigned = $this->SysUserAdmin->getAssignedDoctorInjector($userId);
-                $mdId = $assigned ?? 0;
+            // Same as insert_subscription_by_values / save_subscription after Stripe: assign MD when missing
+            if ($subscriptionType === 'SUBSCRIPTIONMD' || $subscriptionType === 'SUBSCRIPTIONMDIVT' || $subscriptionType === 'SUBSCRIPTIONMDFILLERS') {
+                $injector = $this->SysUsers->find()
+                    ->where(['SysUsers.id' => $userId, 'SysUsers.md_id' => 0])
+                    ->first();
+                if (!empty($injector)) {
+                    $mdAssigned = $this->SysUserAdmin->getAssignedDoctorInjector($userId);
+                    $this->SysUsers->updateAll(
+                        ['md_id' => $mdAssigned],
+                        ['id' => $userId]
+                    );
+                }
+            }
+
+            $userFresh = $this->SysUsers->get($userId);
+            $mdIdPayment = (int)($userFresh->md_id ?? 0);
+
+            // Mirrors save_subscription successful charge block (DataSubscriptionPayments row).
+            // Optional params record external/Stripe or office payment references (check, wire ref, etc.).
+            $payNotes = $paymentNotes;
+            if ($payNotes === '' && ($extPaymentId !== '' || $extChargeId !== '' || $extReceiptId !== '')) {
+                $payNotes = 'Manual API';
             }
 
             $payEntity = $this->DataSubscriptionPayments->newEntity([
@@ -548,25 +597,39 @@ class SubscriptionController extends AppPluginController {
                 'user_id' => $userId,
                 'subscription_id' => $saved->id,
                 'total' => $amount,
-                'payment_id' => '',
-                'charge_id' => '',
-                'receipt_id' => '',
+                'payment_id' => $extPaymentId,
+                'charge_id' => $extChargeId,
+                'receipt_id' => $extReceiptId,
                 'error' => '',
                 'status' => 'DONE',
-                'notes' => 'Manual subscription (API)',
+                'notes' => $payNotes,
+                'created' => $now,
                 'deleted' => 0,
                 'payment_type' => 'FULL',
                 'payment_description' => $subscriptionType,
                 'main_service' => $mainService,
                 'addons_services' => '',
-                'payment_details' => $paymentDetails,
+                'payment_details' => $paymentDetailsJson,
                 'state' => $userState,
-                'md_id' => $mdId,
+                'md_id' => $mdIdPayment,
             ]);
 
-            if (!$payEntity->hasErrors()) {
-                $this->DataSubscriptionPayments->save($payEntity);
+            if ($payEntity->hasErrors()) {
+                $this->message('Subscription saved but payment validation failed: ' . json_encode($payEntity->getErrors()));
+                return;
             }
+
+            $savedPayment = $this->DataSubscriptionPayments->save($payEntity);
+            if (!$savedPayment) {
+                $this->message('Subscription saved but payment row could not be saved.');
+                return;
+            }
+
+            $this->set('payment_id', $savedPayment->id);
+        }
+
+        if (!empty($user->uid)) {
+            shell_exec(env('COMMAND_PATH', '') . ' subscriptions ' . $user->uid . ' > /dev/null 2>&1 &');
         }
 
         $this->success();
@@ -6387,6 +6450,8 @@ class SubscriptionController extends AppPluginController {
             ->limit($limit)
             ->all();                
 
+
+        //subscription name set manually
         foreach($ent_subs_payment as $ent_payment){
 
             $title = stripos($ent_payment['DataSubscriptions']['subscription_type'], 'MD') !== false 
