@@ -1300,27 +1300,18 @@ class PaymentsController extends AppPluginController{
                     $assignedRep = $this->DataAssignedToRegister->find()->select(['User.id','User.email'])->join([
                         'User' => ['table' => 'sys_users', 'type' => 'LEFT', 'conditions' => 'User.id = DataAssignedToRegister.representative_id'],
                         'DSR' => ['table' => 'data_sales_representative', 'type' => 'LEFT', 'conditions' => 'DSR.user_id = User.id'],
-                    ])->where(['DataAssignedToRegister.user_id' => USER_ID,'DataAssignedToRegister.deleted' => 0, 'DSR.team' => 'OUTSIDE'])->last();
-
-                    if(empty($assignedRep)){
-                        $Login = new LoginController();
-                        $Login->assignRep(true);
-                        $assignedRep = $this->DataAssignedToRegister->find()->select(['User.id','User.email'])->join([
-                            'User' => ['table' => 'sys_users', 'type' => 'LEFT', 'conditions' => 'User.id = DataAssignedToRegister.representative_id'],
-                            'DSR' => ['table' => 'data_sales_representative', 'type' => 'LEFT', 'conditions' => 'DSR.user_id = User.id'],
-                        ])->where(['DataAssignedToRegister.user_id' => USER_ID,'DataAssignedToRegister.deleted' => 0, 'DSR.team' => 'OUTSIDE'])->last();
-                    }
+                    ])->where(['DataAssignedToRegister.user_id' => USER_ID,'DataAssignedToRegister.deleted' => 0, 'DSR.deleted' => 0, 'DSR.team' => 'OUTSIDE'])->last();
                 } else{
                     $assignedRep = $this->DataAssignedToRegister->find()->select(['User.id','User.email'])->join([
                         'User' => ['table' => 'sys_users', 'type' => 'LEFT', 'conditions' => 'User.id = DataAssignedToRegister.representative_id'],
                         'DSR' => ['table' => 'data_sales_representative', 'type' => 'LEFT', 'conditions' => 'DSR.user_id = User.id'],
-                    ])->where(['DataAssignedToRegister.user_id' => USER_ID,'DataAssignedToRegister.deleted' => 0, 'DSR.team' => 'INSIDE'])->last();
+                    ])->where(['DataAssignedToRegister.user_id' => USER_ID,'DataAssignedToRegister.deleted' => 0, 'DSR.deleted' => 0, 'DSR.team' => 'INSIDE'])->last();
 
                     if(empty($assignedRep)){
                         $assignedRep = $this->DataAssignedToRegister->find()->select(['User.id','User.email'])->join([
                             'User' => ['table' => 'sys_users', 'type' => 'LEFT', 'conditions' => 'User.id = DataAssignedToRegister.representative_id'],
                             'DSR' => ['table' => 'data_sales_representative', 'type' => 'LEFT', 'conditions' => 'DSR.user_id = User.id'],
-                        ])->where(['DataAssignedToRegister.user_id' => USER_ID,'DataAssignedToRegister.deleted' => 0, 'DSR.team' => 'OUTSIDE'])->last();
+                        ])->where(['DataAssignedToRegister.user_id' => USER_ID,'DataAssignedToRegister.deleted' => 0, 'DSR.deleted' => 0, 'DSR.team' => 'OUTSIDE'])->last();
                     }
                 }
 
@@ -1333,8 +1324,12 @@ class PaymentsController extends AppPluginController{
                             'DataPayment.type' => $type_string])->first();
 
                     $this->loadModel('SpaLiveV1.DataSalesRepresentative');
-                    $representative = $this->DataSalesRepresentative->find()->where(['DataSalesRepresentative.user_id' => $assignedRep['User']['id']])->first();
+                    $representative = $this->DataSalesRepresentative->find()->where([
+                        'DataSalesRepresentative.user_id' => $assignedRep['User']['id'],
+                        'DataSalesRepresentative.deleted' => 0,
+                    ])->first();
 
+                    if (!empty($representative) && !empty($pay)) {
                     if($course == 'NEUROTOXINS BASIC'){  $this->log(__LINE__ . ' ' . json_encode('NEUROTOXINS BASIC'));
                         $this->notificateSMS($assignedRep['User']['id'],'MySpaLive - ' . USER_NAME . ' ' . USER_LNAME . ', ' . $this->formatPhoneNumber(USER_PHONE) . ', has completed the basic training purchase for $' . $total_amount / 100, $Main);
                         $msg = 'MySpaLive - ' . USER_NAME . ' ' . USER_LNAME . ', has completed the basic training purchase for $' . $total_amount / 100;
@@ -1349,6 +1344,12 @@ class PaymentsController extends AppPluginController{
                             $invite_user = $this->SysUsers->find()->where(['id' => $existUser->parent_id, 'deleted' => 0, 'active' => 1])->first();
 
                             if(!empty($invite_user)){
+                                $parentRepRow = $this->DataSalesRepresentative->find()->where([
+                                    'DataSalesRepresentative.user_id' => $existUser->parent_id,
+                                    'DataSalesRepresentative.deleted' => 0,
+                                ])->first();
+
+                            if (!empty($parentRepRow)) {
                                 $array_save_invitation = array(
                                     'uid' => Text::uuid(),
                                     'payment_id' => $pay->id,
@@ -1367,6 +1368,7 @@ class PaymentsController extends AppPluginController{
                                 $this->full_comission = 5000;
                                 $service = 'Neurtoxins';
                                 // $this->send_email_sales_team_member(USER_ID, $service, 'MD', 'Full', 7500, $assignedRep);
+                            }
                             }
                         }
                         #endregion
@@ -1389,9 +1391,9 @@ class PaymentsController extends AppPluginController{
                             $amount_comission = $amount_comission == 0 ? 0 : 5000;
                             $senior_rep = $this->DataSalesRepresentative->find()->select(['DataSalesRepresentative.user_id','User.id','User.email'])->join([
                                 'User' => ['table' => 'sys_users', 'type' => 'LEFT', 'conditions' => 'User.id = DataSalesRepresentative.user_id'],
-                            ])->where(['DataSalesRepresentative.rank' => 'SENIOR', 'DataSalesRepresentative.team' => 'OUTSIDE'])->first(); // Buscamos al representante SENIOR ya que solo habra uno en la tabla 
+                            ])->where(['DataSalesRepresentative.deleted' => 0, 'DataSalesRepresentative.rank' => 'SENIOR', 'DataSalesRepresentative.team' => 'OUTSIDE'])->first(); // Buscamos al representante SENIOR ya que solo habra uno en la tabla 
 
-                            if(!empty($pay)){
+                            if(!empty($pay) && !empty($senior_rep)){
                                 $array_save_comission = array(
                                     'uid' => Text::uuid(),
                                     'payment_id' => $pay->id,
@@ -1414,9 +1416,9 @@ class PaymentsController extends AppPluginController{
                             $amount_comission_senior = $amount_comission == 0 ? 0 : 5000;
                             $senior_rep = $this->DataSalesRepresentative->find()->select(['DataSalesRepresentative.user_id','User.id','User.email'])->join([
                                 'User' => ['table' => 'sys_users', 'type' => 'LEFT', 'conditions' => 'User.id = DataSalesRepresentative.user_id'],
-                            ])->where(['DataSalesRepresentative.rank' => 'SENIOR', 'DataSalesRepresentative.team' => 'OUTSIDE'])->first(); // Buscamos al representante SENIOR ya que solo habra uno en la tabla 
+                            ])->where(['DataSalesRepresentative.deleted' => 0, 'DataSalesRepresentative.rank' => 'SENIOR', 'DataSalesRepresentative.team' => 'OUTSIDE'])->first(); // Buscamos al representante SENIOR ya que solo habra uno en la tabla 
 
-                            if(!empty($pay)){
+                            if(!empty($pay) && !empty($senior_rep)){
                                 $array_save_comission = array(
                                     'uid' => Text::uuid(),
                                     'payment_id' => $pay->id,
@@ -1476,9 +1478,9 @@ class PaymentsController extends AppPluginController{
                                 $amount_comission = $amount_comission == 0 ? 0 : 5000;
                                 $senior_rep = $this->DataSalesRepresentative->find()->select(['DataSalesRepresentative.user_id','User.id','User.email'])->join([
                                     'User' => ['table' => 'sys_users', 'type' => 'LEFT', 'conditions' => 'User.id = DataSalesRepresentative.user_id'],
-                                ])->where(['DataSalesRepresentative.rank' => 'SENIOR', 'DataSalesRepresentative.team' => 'OUTSIDE'])->first(); // Buscamos al representante SENIOR ya que solo habra uno en la tabla 
+                                ])->where(['DataSalesRepresentative.deleted' => 0, 'DataSalesRepresentative.rank' => 'SENIOR', 'DataSalesRepresentative.team' => 'OUTSIDE'])->first(); // Buscamos al representante SENIOR ya que solo habra uno en la tabla 
     
-                                if(!empty($pay)){
+                                if(!empty($pay) && !empty($senior_rep)){
                                     $array_save_comission = array(
                                         'uid' => Text::uuid(),
                                         'payment_id' => $pay->id,
@@ -1501,9 +1503,9 @@ class PaymentsController extends AppPluginController{
                                 $amount_comission_senior = $amount_comission == 0 ? 0 : 5000;
                                 $senior_rep = $this->DataSalesRepresentative->find()->select(['DataSalesRepresentative.user_id','User.id','User.email'])->join([
                                     'User' => ['table' => 'sys_users', 'type' => 'LEFT', 'conditions' => 'User.id = DataSalesRepresentative.user_id'],
-                                ])->where(['DataSalesRepresentative.rank' => 'SENIOR', 'DataSalesRepresentative.team' => 'OUTSIDE'])->first(); // Buscamos al representante SENIOR ya que solo habra uno en la tabla 
+                                ])->where(['DataSalesRepresentative.deleted' => 0, 'DataSalesRepresentative.rank' => 'SENIOR', 'DataSalesRepresentative.team' => 'OUTSIDE'])->first(); // Buscamos al representante SENIOR ya que solo habra uno en la tabla 
     
-                                if(!empty($pay)){
+                                if(!empty($pay) && !empty($senior_rep)){
                                     $array_save_comission = array(
                                         'uid' => Text::uuid(),
                                         'payment_id' => $pay->id,
@@ -1564,9 +1566,9 @@ class PaymentsController extends AppPluginController{
                                 $amount_comission = $amount_comission == 0 ? 0 : 5000;
                                 $senior_rep = $this->DataSalesRepresentative->find()->select(['DataSalesRepresentative.user_id','User.id','User.email'])->join([
                                     'User' => ['table' => 'sys_users', 'type' => 'LEFT', 'conditions' => 'User.id = DataSalesRepresentative.user_id'],
-                                ])->where(['DataSalesRepresentative.rank' => 'SENIOR'])->first(); // Buscamos al representante SENIOR ya que solo habra uno en la tabla 
+                                ])->where(['DataSalesRepresentative.deleted' => 0, 'DataSalesRepresentative.rank' => 'SENIOR'])->first(); // Buscamos al representante SENIOR ya que solo habra uno en la tabla 
     
-                                if(!empty($pay)){
+                                if(!empty($pay) && !empty($senior_rep)){
                                     $array_save_comission = array(
                                         'uid' => Text::uuid(),
                                         'payment_id' => $pay->id,
@@ -1589,9 +1591,9 @@ class PaymentsController extends AppPluginController{
                                 $amount_comission_senior = $amount_comission == 0 ? 0 : 5000;
                                 $senior_rep = $this->DataSalesRepresentative->find()->select(['DataSalesRepresentative.user_id','User.id','User.email'])->join([
                                     'User' => ['table' => 'sys_users', 'type' => 'LEFT', 'conditions' => 'User.id = DataSalesRepresentative.user_id'],
-                                ])->where(['DataSalesRepresentative.rank' => 'SENIOR', 'DataSalesRepresentative.team' => 'OUTSIDE'])->first(); // Buscamos al representante SENIOR ya que solo habra uno en la tabla 
+                                ])->where(['DataSalesRepresentative.deleted' => 0, 'DataSalesRepresentative.rank' => 'SENIOR', 'DataSalesRepresentative.team' => 'OUTSIDE'])->first(); // Buscamos al representante SENIOR ya que solo habra uno en la tabla 
     
-                                if(!empty($pay)){
+                                if(!empty($pay) && !empty($senior_rep)){
                                     $array_save_comission = array(
                                         'uid' => Text::uuid(),
                                         'payment_id' => $pay->id,
@@ -1650,7 +1652,7 @@ class PaymentsController extends AppPluginController{
                             'uid' => Text::uuid(),
                             'payment_id' => $pay->id,
                             'amount' => $amount_comission,
-                            'user_id' => $description_comission == 'SALES TEAM OTHER COURSE' ? 6101 : $assignedRep['User']['id'],
+                            'user_id' => $assignedRep['User']['id'],
                             'payment_uid' => '',
                             'description' => $description_comission,
                             'payload' => '',
@@ -1665,6 +1667,7 @@ class PaymentsController extends AppPluginController{
                         $this->send_email_team_member_courses(USER_ID, $service, $type_string, $amount_comission, $assignedRep);
                         //Assign inside sales rep
                         if($course == 'NEUROTOXINS BASIC') $this->assignRepInside();
+                    }
                     }
                 }
 
@@ -3599,29 +3602,45 @@ class PaymentsController extends AppPluginController{
                             $assignedRep = $this->DataAssignedToRegister->find()->select(['User.id','User.email'])->join([
                                 'User' => ['table' => 'sys_users', 'type' => 'LEFT', 'conditions' => 'User.id = DataAssignedToRegister.representative_id'],
                                 'DSR' => ['table' => 'data_sales_representative', 'type' => 'LEFT', 'conditions' => 'DSR.user_id = User.id'],
-                            ])->where(['DataAssignedToRegister.user_id' => USER_ID,'DataAssignedToRegister.deleted' => 0, 'DSR.team' => 'OUTSIDE'])->last();
+                            ])->where(['DataAssignedToRegister.user_id' => USER_ID,'DataAssignedToRegister.deleted' => 0, 'DSR.deleted' => 0, 'DSR.team' => 'OUTSIDE'])->last();
         
                             if(empty($assignedRep)){
                                 $assignedRep = $this->DataAssignedToRegister->find()->select(['User.id','User.email'])->join([
                                     'User' => ['table' => 'sys_users', 'type' => 'LEFT', 'conditions' => 'User.id = DataAssignedToRegister.representative_id'],
                                     'DSR' => ['table' => 'data_sales_representative', 'type' => 'LEFT', 'conditions' => 'DSR.user_id = User.id'],
-                                ])->where(['DataAssignedToRegister.user_id' => USER_ID,'DataAssignedToRegister.deleted' => 0, 'DSR.team' => 'INSIDE'])->last();
+                                ])->where(['DataAssignedToRegister.user_id' => USER_ID,'DataAssignedToRegister.deleted' => 0, 'DSR.deleted' => 0, 'DSR.team' => 'INSIDE'])->last();
                             }
                         } else{
                             $assignedRep = $this->DataAssignedToRegister->find()->select(['User.id','User.email'])->join([
                                 'User' => ['table' => 'sys_users', 'type' => 'LEFT', 'conditions' => 'User.id = DataAssignedToRegister.representative_id'],
                                 'DSR' => ['table' => 'data_sales_representative', 'type' => 'LEFT', 'conditions' => 'DSR.user_id = User.id'],
-                            ])->where(['DataAssignedToRegister.user_id' => USER_ID,'DataAssignedToRegister.deleted' => 0, 'DSR.team' => 'INSIDE'])->last();
+                            ])->where(['DataAssignedToRegister.user_id' => USER_ID,'DataAssignedToRegister.deleted' => 0, 'DSR.deleted' => 0, 'DSR.team' => 'INSIDE'])->last();
         
                             if(empty($assignedRep)){
                                 $assignedRep = $this->DataAssignedToRegister->find()->select(['User.id','User.email'])->join([
                                     'User' => ['table' => 'sys_users', 'type' => 'LEFT', 'conditions' => 'User.id = DataAssignedToRegister.representative_id'],
                                     'DSR' => ['table' => 'data_sales_representative', 'type' => 'LEFT', 'conditions' => 'DSR.user_id = User.id'],
-                                ])->where(['DataAssignedToRegister.user_id' => USER_ID,'DataAssignedToRegister.deleted' => 0, 'DSR.team' => 'OUTSIDE'])->last();
+                                ])->where(['DataAssignedToRegister.user_id' => USER_ID,'DataAssignedToRegister.deleted' => 0, 'DSR.deleted' => 0, 'DSR.team' => 'OUTSIDE'])->last();
                             }
                         }
 
                         if (!empty($assignedRep)) {
+
+                            $this->loadModel('SpaLiveV1.DataPayment');
+                            $this->loadModel('SpaLiveV1.DataSalesRepresentativePayments');
+                            $this->loadModel('SpaLiveV1.DataSalesRepresentative');
+
+                            $pay = $this->DataPayment->find()
+                            ->where(['DataPayment.id_from' => USER_ID,
+                                    'DataPayment.uid' => $uid,
+                                    'DataPayment.type' => $label])->first();
+
+                            $representative = $this->DataSalesRepresentative->find()->where([
+                                'DataSalesRepresentative.user_id' => $assignedRep['User']['id'],
+                                'DataSalesRepresentative.deleted' => 0,
+                            ])->first();
+
+                            if (!empty($pay) && !empty($representative)) {
 
                             $text_for_sms = "advanced";
 
@@ -3649,16 +3668,7 @@ class PaymentsController extends AppPluginController{
 
                             $this->notificateSMS($assignedRep['User']['id'],'MySpaLive - ' . USER_NAME . ' ' . USER_LNAME . ', ' . $this->formatPhoneNumber(USER_PHONE) . ', has completed the '.$text_for_sms.' training purchase for $' . $total_amount / 100, $Main);
                             #region Pay comission to sales representative
-                                
-                            $this->loadModel('SpaLiveV1.DataSalesRepresentativePayments');
-            
-                            $this->loadModel('SpaLiveV1.DataPayment');
-            
-                            $pay = $this->DataPayment->find()
-                            ->where(['DataPayment.id_from' => USER_ID, 
-                                    'DataPayment.uid' => $uid, 
-                                    'DataPayment.type' => $label])->first();
-                            if(!empty($pay)){
+
                                 $value_discount = $this->getParams('discount_amount', 0);
                                 /* if($value_discount <= 20000){ // 795 - 200 = 595
                                     $amount_comission = $this->full_comission;
@@ -3670,17 +3680,14 @@ class PaymentsController extends AppPluginController{
                                     $amount_comission = 0;
                                 }
 
-                                $this->loadModel('SpaLiveV1.DataSalesRepresentative');
-                                $representative = $this->DataSalesRepresentative->find()->where(['DataSalesRepresentative.user_id' => $assignedRep['User']['id']])->first();
-
                                 if($representative->team == 'INSIDE'){
                                     if($representative->rank == 'JUNIOR' ){ // Si el representante es JUNIOR y no hay invitacion entonces se cambia el monto de la comision a $50 y se agrega el pago para el SENIOR de otros $50
                                         $amount_comission = $amount_comission == 0 ? 0 : 5000;
                                         $senior_rep = $this->DataSalesRepresentative->find()->select(['DataSalesRepresentative.user_id','User.id','User.email'])->join([
                                             'User' => ['table' => 'sys_users', 'type' => 'LEFT', 'conditions' => 'User.id = DataSalesRepresentative.user_id'],
-                                        ])->where(['DataSalesRepresentative.rank' => 'SENIOR', 'DataSalesRepresentative.team' => 'OUTSIDE'])->first(); // Buscamos al representante SENIOR ya que solo habra uno en la tabla 
+                                        ])->where(['DataSalesRepresentative.deleted' => 0, 'DataSalesRepresentative.rank' => 'SENIOR', 'DataSalesRepresentative.team' => 'OUTSIDE'])->first(); // Buscamos al representante SENIOR ya que solo habra uno en la tabla 
             
-                                        if(!empty($pay)){
+                                        if(!empty($pay) && !empty($senior_rep)){
                                             $array_save_comission = array(
                                                 'uid' => Text::uuid(),
                                                 'payment_id' => $pay->id,
@@ -3703,9 +3710,9 @@ class PaymentsController extends AppPluginController{
                                         $amount_comission_senior = $amount_comission == 0 ? 0 : 5000;
                                         $senior_rep = $this->DataSalesRepresentative->find()->select(['DataSalesRepresentative.user_id','User.id','User.email'])->join([
                                             'User' => ['table' => 'sys_users', 'type' => 'LEFT', 'conditions' => 'User.id = DataSalesRepresentative.user_id'],
-                                        ])->where(['DataSalesRepresentative.rank' => 'SENIOR', 'DataSalesRepresentative.team' => 'OUTSIDE'])->first(); // Buscamos al representante SENIOR ya que solo habra uno en la tabla 
+                                        ])->where(['DataSalesRepresentative.deleted' => 0, 'DataSalesRepresentative.rank' => 'SENIOR', 'DataSalesRepresentative.team' => 'OUTSIDE'])->first(); // Buscamos al representante SENIOR ya que solo habra uno en la tabla 
             
-                                        if(!empty($pay)){
+                                        if(!empty($pay) && !empty($senior_rep)){
                                             $array_save_comission = array(
                                                 'uid' => Text::uuid(),
                                                 'payment_id' => $pay->id,
@@ -3744,9 +3751,9 @@ class PaymentsController extends AppPluginController{
                 
                                 $c_entity_comission = $this->DataSalesRepresentativePayments->newEntity($array_save_comission);
                                 $this->DataSalesRepresentativePayments->save($c_entity_comission);
-                            }
 
                             #endregion
+                            }
                         }
                     }
 
@@ -7267,11 +7274,20 @@ class PaymentsController extends AppPluginController{
         $this->loadModel('SpaLiveV1.SysUsers');
         $this->loadModel('SpaLiveV1.DataPayment');
         $this->loadModel('SpaLiveV1.DataSalesTeamPatients');
+        $this->loadModel('SpaLiveV1.DataSalesRepresentative');
         $this->loadModel('SpaLiveV1.DataSalesRepresentativePayments');
 
         $sales = $this->DataSalesTeamPatients->find()->where(['DataSalesTeamPatients.patient_id' => $patient_id, 'DataSalesTeamPatients.deleted' => 0])->first();
 
         if(!empty($sales)){
+            $dsrActive = $this->DataSalesRepresentative->find()->where([
+                'DataSalesRepresentative.user_id' => $sales->sales_team_id,
+                'DataSalesRepresentative.deleted' => 0,
+            ])->first();
+            if (empty($dsrActive)) {
+                return;
+            }
+
             $dataPay = $this->DataPayment->find()->where(['DataPayment.id_from' => $patient_id, 'DataPayment.type' => 'WEIGHT LOSS','DataPayment.is_visible' => 1, 'DataPayment.payment <>' => ''])->first();
             $sales_rep = $this->SysUsers->find()->where(['id' => $sales->sales_team_id, 'deleted' => 0])->first();
         

@@ -936,27 +936,18 @@ class AffirmController extends AppPluginController {
                     $assignedRep = $this->DataAssignedToRegister->find()->select(['User.id','User.email'])->join([
                         'User' => ['table' => 'sys_users', 'type' => 'LEFT', 'conditions' => 'User.id = DataAssignedToRegister.representative_id'],
                         'DSR' => ['table' => 'data_sales_representative', 'type' => 'LEFT', 'conditions' => 'DSR.user_id = User.id'],
-                    ])->where(['DataAssignedToRegister.user_id' => USER_ID,'DataAssignedToRegister.deleted' => 0, 'DSR.team' => 'OUTSIDE'])->last();
-
-                    if(empty($assignedRep)){
-                        $Login = new LoginController();
-                        $Login->assignRep(true);
-                        $assignedRep = $this->DataAssignedToRegister->find()->select(['User.id','User.email'])->join([
-                            'User' => ['table' => 'sys_users', 'type' => 'LEFT', 'conditions' => 'User.id = DataAssignedToRegister.representative_id'],
-                            'DSR' => ['table' => 'data_sales_representative', 'type' => 'LEFT', 'conditions' => 'DSR.user_id = User.id'],
-                        ])->where(['DataAssignedToRegister.user_id' => USER_ID,'DataAssignedToRegister.deleted' => 0, 'DSR.team' => 'OUTSIDE'])->last();
-                    }
+                    ])->where(['DataAssignedToRegister.user_id' => USER_ID,'DataAssignedToRegister.deleted' => 0, 'DSR.deleted' => 0, 'DSR.team' => 'OUTSIDE'])->last();
                 } else{
                     $assignedRep = $this->DataAssignedToRegister->find()->select(['User.id','User.email'])->join([
                         'User' => ['table' => 'sys_users', 'type' => 'LEFT', 'conditions' => 'User.id = DataAssignedToRegister.representative_id'],
                         'DSR' => ['table' => 'data_sales_representative', 'type' => 'LEFT', 'conditions' => 'DSR.user_id = User.id'],
-                    ])->where(['DataAssignedToRegister.user_id' => USER_ID,'DataAssignedToRegister.deleted' => 0, 'DSR.team' => 'INSIDE'])->last();
+                    ])->where(['DataAssignedToRegister.user_id' => USER_ID,'DataAssignedToRegister.deleted' => 0, 'DSR.deleted' => 0, 'DSR.team' => 'INSIDE'])->last();
 
                     if(empty($assignedRep)){
                         $assignedRep = $this->DataAssignedToRegister->find()->select(['User.id','User.email'])->join([
                             'User' => ['table' => 'sys_users', 'type' => 'LEFT', 'conditions' => 'User.id = DataAssignedToRegister.representative_id'],
                             'DSR' => ['table' => 'data_sales_representative', 'type' => 'LEFT', 'conditions' => 'DSR.user_id = User.id'],
-                        ])->where(['DataAssignedToRegister.user_id' => USER_ID,'DataAssignedToRegister.deleted' => 0, 'DSR.team' => 'OUTSIDE'])->last();
+                        ])->where(['DataAssignedToRegister.user_id' => USER_ID,'DataAssignedToRegister.deleted' => 0, 'DSR.deleted' => 0, 'DSR.team' => 'OUTSIDE'])->last();
                     }
                 }
     
@@ -969,8 +960,12 @@ class AffirmController extends AppPluginController {
                         'DataPayment.type' => $type_string])->first();*/
 
                 $this->loadModel('SpaLiveV1.DataSalesRepresentative');
-                $representative = $this->DataSalesRepresentative->find()->where(['DataSalesRepresentative.user_id' => $assignedRep['User']['id']])->first();
+                $representative = $this->DataSalesRepresentative->find()->where([
+                    'DataSalesRepresentative.user_id' => $assignedRep['User']['id'],
+                    'DataSalesRepresentative.deleted' => 0,
+                ])->first();
 
+                if (!empty($representative) && !empty($pay)) {
                 if($course == 'BASIC COURSE'){  $this->log(__LINE__ . ' ' . json_encode('NEUROTOXINS BASIC'));
                     $this->notificateSMS($assignedRep['User']['id'],'MySpaLive - ' . USER_NAME . ' ' . USER_LNAME . ', ' . $this->formatPhoneNumber(USER_PHONE) . ', has completed the basic training purchase for $' . $pay['total'] / 100, $Main);
                     $msg = 'MySpaLive - ' . USER_NAME . ' ' . USER_LNAME . ', has completed the basic training purchase for $' . $pay['total'] / 100;
@@ -985,6 +980,12 @@ class AffirmController extends AppPluginController {
                         $invite_user = $this->SysUsers->find()->where(['id' => $existUser->parent_id, 'deleted' => 0, 'active' => 1])->first();
 
                         if(!empty($invite_user)){
+                            $parentRepRow = $this->DataSalesRepresentative->find()->where([
+                                'DataSalesRepresentative.user_id' => $existUser->parent_id,
+                                'DataSalesRepresentative.deleted' => 0,
+                            ])->first();
+
+                        if (!empty($parentRepRow)) {
                             $array_save_invitation = array(
                                 'uid' => Text::uuid(),
                                 'payment_id' => $pay->id,
@@ -1003,6 +1004,7 @@ class AffirmController extends AppPluginController {
                             $this->full_comission = 5000;
                             $service = 'Neurtoxins';
                             // $this->send_email_sales_team_member(USER_ID, $service, 'MD', 'Full', 7500, $assignedRep);
+                        }
                         }
                     }
                     #endregion
@@ -1025,9 +1027,9 @@ class AffirmController extends AppPluginController {
                         $amount_comission = $amount_comission == 0 ? 0 : 5000;
                         $senior_rep = $this->DataSalesRepresentative->find()->select(['DataSalesRepresentative.user_id','User.id','User.email'])->join([
                             'User' => ['table' => 'sys_users', 'type' => 'LEFT', 'conditions' => 'User.id = DataSalesRepresentative.user_id'],
-                        ])->where(['DataSalesRepresentative.rank' => 'SENIOR'])->first(); // Buscamos al representante SENIOR ya que solo habra uno en la tabla 
+                        ])->where(['DataSalesRepresentative.deleted' => 0, 'DataSalesRepresentative.rank' => 'SENIOR'])->first(); // Buscamos al representante SENIOR ya que solo habra uno en la tabla 
 
-                        if(!empty($pay)){
+                        if(!empty($pay) && !empty($senior_rep)){
                             $array_save_comission = array(
                                 'uid' => Text::uuid(),
                                 'payment_id' => $pay->id,
@@ -1050,9 +1052,9 @@ class AffirmController extends AppPluginController {
                         $amount_comission_senior = $amount_comission == 0 ? 0 : 5000;
                         $senior_rep = $this->DataSalesRepresentative->find()->select(['DataSalesRepresentative.user_id','User.id','User.email'])->join([
                             'User' => ['table' => 'sys_users', 'type' => 'LEFT', 'conditions' => 'User.id = DataSalesRepresentative.user_id'],
-                        ])->where(['DataSalesRepresentative.rank' => 'SENIOR'])->first(); // Buscamos al representante SENIOR ya que solo habra uno en la tabla 
+                        ])->where(['DataSalesRepresentative.deleted' => 0, 'DataSalesRepresentative.rank' => 'SENIOR'])->first(); // Buscamos al representante SENIOR ya que solo habra uno en la tabla 
 
-                        if(!empty($pay)){
+                        if(!empty($pay) && !empty($senior_rep)){
                             $array_save_comission = array(
                                 'uid' => Text::uuid(),
                                 'payment_id' => $pay->id,
@@ -1112,9 +1114,9 @@ class AffirmController extends AppPluginController {
                             $amount_comission = $amount_comission == 0 ? 0 : 5000;
                             $senior_rep = $this->DataSalesRepresentative->find()->select(['DataSalesRepresentative.user_id','User.id','User.email'])->join([
                                 'User' => ['table' => 'sys_users', 'type' => 'LEFT', 'conditions' => 'User.id = DataSalesRepresentative.user_id'],
-                            ])->where(['DataSalesRepresentative.rank' => 'SENIOR'])->first(); // Buscamos al representante SENIOR ya que solo habra uno en la tabla 
+                            ])->where(['DataSalesRepresentative.deleted' => 0, 'DataSalesRepresentative.rank' => 'SENIOR'])->first(); // Buscamos al representante SENIOR ya que solo habra uno en la tabla 
     
-                            if(!empty($pay)){
+                            if(!empty($pay) && !empty($senior_rep)){
                                 $array_save_comission = array(
                                     'uid' => Text::uuid(),
                                     'payment_id' => $pay->id,
@@ -1137,9 +1139,9 @@ class AffirmController extends AppPluginController {
                             $amount_comission_senior = $amount_comission == 0 ? 0 : 5000;
                             $senior_rep = $this->DataSalesRepresentative->find()->select(['DataSalesRepresentative.user_id','User.id','User.email'])->join([
                                 'User' => ['table' => 'sys_users', 'type' => 'LEFT', 'conditions' => 'User.id = DataSalesRepresentative.user_id'],
-                            ])->where(['DataSalesRepresentative.rank' => 'SENIOR'])->first(); // Buscamos al representante SENIOR ya que solo habra uno en la tabla 
+                            ])->where(['DataSalesRepresentative.deleted' => 0, 'DataSalesRepresentative.rank' => 'SENIOR'])->first(); // Buscamos al representante SENIOR ya que solo habra uno en la tabla 
     
-                            if(!empty($pay)){
+                            if(!empty($pay) && !empty($senior_rep)){
                                 $array_save_comission = array(
                                     'uid' => Text::uuid(),
                                     'payment_id' => $pay->id,
@@ -1186,9 +1188,9 @@ class AffirmController extends AppPluginController {
                             $amount_comission = $amount_comission == 0 ? 0 : 5000;
                             $senior_rep = $this->DataSalesRepresentative->find()->select(['DataSalesRepresentative.user_id','User.id','User.email'])->join([
                                 'User' => ['table' => 'sys_users', 'type' => 'LEFT', 'conditions' => 'User.id = DataSalesRepresentative.user_id'],
-                            ])->where(['DataSalesRepresentative.rank' => 'SENIOR'])->first(); // Buscamos al representante SENIOR ya que solo habra uno en la tabla 
+                            ])->where(['DataSalesRepresentative.deleted' => 0, 'DataSalesRepresentative.rank' => 'SENIOR'])->first(); // Buscamos al representante SENIOR ya que solo habra uno en la tabla 
     
-                            if(!empty($pay)){
+                            if(!empty($pay) && !empty($senior_rep)){
                                 $array_save_comission = array(
                                     'uid' => Text::uuid(),
                                     'payment_id' => $pay->id,
@@ -1211,9 +1213,9 @@ class AffirmController extends AppPluginController {
                             $amount_comission_senior = $amount_comission == 0 ? 0 : 5000;
                             $senior_rep = $this->DataSalesRepresentative->find()->select(['DataSalesRepresentative.user_id','User.id','User.email'])->join([
                                 'User' => ['table' => 'sys_users', 'type' => 'LEFT', 'conditions' => 'User.id = DataSalesRepresentative.user_id'],
-                            ])->where(['DataSalesRepresentative.rank' => 'SENIOR'])->first(); // Buscamos al representante SENIOR ya que solo habra uno en la tabla 
+                            ])->where(['DataSalesRepresentative.deleted' => 0, 'DataSalesRepresentative.rank' => 'SENIOR'])->first(); // Buscamos al representante SENIOR ya que solo habra uno en la tabla 
     
-                            if(!empty($pay)){
+                            if(!empty($pay) && !empty($senior_rep)){
                                 $array_save_comission = array(
                                     'uid' => Text::uuid(),
                                     'payment_id' => $pay->id,
@@ -1261,6 +1263,7 @@ class AffirmController extends AppPluginController {
                 if($course == 'BASIC COURSE'){
                     $Pay = new PaymentsController(); 
                     $Pay->assignRepInside();
+                }
                 }
             }
 
