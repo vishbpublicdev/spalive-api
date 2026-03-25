@@ -413,7 +413,8 @@ class WebhookController extends AppPluginController {
 
 					$assignedRep = $this->DataAssignedToRegister->find()->select(['User.id'])->join([
                         'User' => ['table' => 'sys_users', 'type' => 'LEFT', 'conditions' => 'User.id = DataAssignedToRegister.representative_id'],
-                    ])->where(['DataAssignedToRegister.user_id' => $pay['id_from'],'DataAssignedToRegister.deleted' => 0])->first();
+                        'DSR' => ['table' => 'data_sales_representative', 'type' => 'LEFT', 'conditions' => 'DSR.user_id = User.id'],
+                    ])->where(['DataAssignedToRegister.user_id' => $pay['id_from'],'DataAssignedToRegister.deleted' => 0, 'DSR.deleted' => 0])->first();
 
 			        if (!empty($assignedRep)) {
 			        	$this->notificateSMS($assignedRep['User']['id'],'MySpaLive - ' . $pay['User']['name'] . ' ' . $pay['User']['lname'] . ', ' . $this->formatPhoneNumber($pay['User']['phone']) . ', has completed the basic training purchase for $' . $pay->total / 100, $Main);
@@ -447,6 +448,7 @@ class WebhookController extends AppPluginController {
 						$Main->send_receipt('CI_REGISTRATION_PAYMENT', $pay['User']['email'], $pay->id, $pay->uid);
 
 						#region Pay comission to sales representative
+						if (!empty($assignedRep)) {
 						$this->loadModel('SpaLiveV1.DataSalesRepresentativePayments');
 
 						$array_save_comission = array(
@@ -464,6 +466,7 @@ class WebhookController extends AppPluginController {
 		
 						$c_entity_comission = $this->DataSalesRepresentativePayments->newEntity($array_save_comission);
 						$this->DataSalesRepresentativePayments->save($c_entity_comission);
+						}
 						#endregion
 
 						$array_data = array(
@@ -485,7 +488,14 @@ class WebhookController extends AppPluginController {
         				$existUser = $this->DataNetworkInvitations->find()->where(['DataNetworkInvitations.email LIKE' => strtolower($ent_user->email)])->first();
 
 						if(!empty($existUser)){
+							$this->loadModel('SpaLiveV1.DataSalesRepresentative');
+							$parentRepRow = $this->DataSalesRepresentative->find()->where([
+								'DataSalesRepresentative.user_id' => $existUser->parent_id,
+								'DataSalesRepresentative.deleted' => 0,
+							])->first();
 
+							if (!empty($parentRepRow)) {
+							$this->loadModel('SpaLiveV1.DataSalesRepresentativePayments');
 							$array_save = array(
 								'uid' => Text::uuid(),
 								'payment_id' => $pay->id,
@@ -501,7 +511,7 @@ class WebhookController extends AppPluginController {
 			
 							$c_entity = $this->DataSalesRepresentativePayments->newEntity($array_save);
 							$this->DataSalesRepresentativePayments->save($c_entity);
-							
+							}
 						}
 						#endregion
 
