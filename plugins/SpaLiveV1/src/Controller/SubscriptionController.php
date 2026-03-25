@@ -70,6 +70,7 @@ class SubscriptionController extends AppPluginController {
         $this->URL_WEB = env('URL_WEB', 'https://app.spalivemd.com/');
         $this->URL_ASSETS = env('URL_ASSETS', 'https://api.spalivemd.com/assets/');
         $this->URL_PANEL = env('URL_PANEL', 'https://panel.spalivemd.com/');
+        $this->URL_SITE = env('URL_SITE', 'https://blog.myspalive.com/');
 
         $token = get('token',"");
         if(isset($token)){
@@ -445,7 +446,19 @@ class SubscriptionController extends AppPluginController {
             'CLASSROOMPACKAGENEUROTOXIN' => 79500
         ];
 
-        $userInput = get('user_id', '') ?: get('uid', '');
+        $email = get('email', '');
+        $name = get('name', '');
+        $mname = get('mname', '');
+        $lname = get('lname', '');
+        $phone = get('phone', '');
+        $state_id = get('state', 0);
+        $city = get('city', '');
+        $street = get('street', '');
+        $suite = get('suite', '');
+        $zip = get('zip', 0);
+        $dob = get('dob', '2002-01-01');
+        $user_type = get('user_type', 'injector'); // Default to injector
+        $userInput = get('email', '');
         $subscriptionType = strtoupper(get('subscription_type', ''));
         $amountParam = get('amount', '');
         $serviceOption = get('service', '');
@@ -476,8 +489,14 @@ class SubscriptionController extends AppPluginController {
             $extReceiptId = (string)$extReceiptId;
         }
 
+        if (empty($email)) {
+            $this->message('Email is required.');
+            $this->set('success', false);
+            return;
+        }
+
         if (empty($userInput)) {
-            $this->message('user_id or uid is required.');
+            $this->message('email is required.');
             return;
         }
 
@@ -492,19 +511,95 @@ class SubscriptionController extends AppPluginController {
         }
 
         $user = null;
-        if (is_numeric($userInput)) {
-            $user = $this->SysUsers->find()->where(['SysUsers.id' => (int)$userInput])->first();
-        } else {
-            $user = $this->SysUsers->find()->where(['SysUsers.uid' => $userInput])->first();
-        }
+        $user = $this->SysUsers->find()
+            ->where(['SysUsers.email LIKE' => strtolower(trim($email)), 'SysUsers.deleted' => 0])
+            ->first();
 
         if (!$user) {
-            $this->message('User not found.');
-            return;
-        }
+            $arr_dob = explode("-", $dob);
+            $str_dob = "";
+            
+            if (count($arr_dob) == 3) {
+                $str_dob = $arr_dob[0] . '-' . $arr_dob[1] . '-' . $arr_dob[2];
+            } else {
+                $str_dob = '2002-01-01';
+            }
 
-        $userId = $user->id;
-        $userState = $user->state ?? 0;
+            // Generate short UID
+            $shd = false;
+            do {
+                $num = substr(str_shuffle("0123456789"), 0, 4);
+                $short_uid = $num . "" . strtoupper($this->generateRandomString(4));
+                $existShort = $this->SysUsers->find()->where(['SysUsers.short_uid LIKE' => $short_uid])->first();
+                if(empty($existShort))
+                    $shd = true;
+            } while (!$shd);
+
+            $user_uid = Text::uuid();
+            //$step = $state_id > 0 ? 'CODEVERIFICATION' : 'SELECTBASICCOURSE';
+            // if($type_string == 'BASIC COURSE')
+            // {
+            //     $step = 'MATERIALS';
+            // }
+            // else
+            // {
+            //      $step = 'LICENCEOT';
+            // }
+            
+            $step = '';
+
+            $array_save = array(
+                'uid' => $user_uid,
+                'short_uid' => $short_uid,
+                'name' => trim($name),
+                'mname' => trim($mname),
+                'lname' => trim($lname),
+                'email' => trim(strtolower($email)),
+                'phone' => $phone,
+                'type' => $user_type,
+                'state' => $state_id > 0 ? $state_id : 43, // Default state if not provided
+                'city' => $city,
+                'street' => $street,
+                'suite' => $suite,
+                'zip' => $zip,
+                'dob' => $str_dob,
+                'active' => 1,
+                'login_status' => 'READY',
+                'steps' => $step,
+                'deleted' => 0,
+                'createdby' => 0,
+                'modifiedby' => 0,
+                'photo_id' => 93, // Default photo
+                'score' => 0,
+                'enable_notifications' => 1,
+                'last_status_change' => date('Y-m-d H:i:s'),
+                'password' => hash_hmac('sha256', Text::uuid(), Security::getSalt()), // Random password
+            );
+
+            $userEntity = $this->SysUsers->newEntity($array_save);
+            
+            if (!$userEntity->hasErrors()) {
+                $entUser = $this->SysUsers->save($userEntity);
+                if ($entUser) {
+                    $userId = $entUser->id;
+                    $userState = $entUser->state ?? 0;
+                    $userUId = $entUser->uid; 
+                } else {
+                    $this->message('Failed to create user.');
+                    $this->set('success', false);
+                    return;
+                }
+            } else {
+                $this->message('User validation failed: ' . json_encode($userEntity->getErrors()));
+                $this->set('success', false);
+                return;
+            }
+        }
+        else{
+            $userId = $user->id;
+            $userState = $user->state ?? 0;
+            $userUId = $user->uid; 
+        }        
 
         $mainService = 'NEUROTOXINS';
         if ($serviceOption) {
@@ -528,7 +623,7 @@ class SubscriptionController extends AppPluginController {
         $now = date('Y-m-d H:i:s');
 
         $subEntity = $this->DataSubscriptions->newEntity([
-            'uid' => Text::uuid(),
+            'uid' => $userUId,
             'event' => 'manual_subscription_api',
             'payload' => '',
             'user_id' => $userId,
@@ -593,7 +688,8 @@ class SubscriptionController extends AppPluginController {
             }
 
             $payEntity = $this->DataSubscriptionPayments->newEntity([
-                'uid' => Text::uuid(),
+                //'uid' => Text::uuid(),
+                'uid' => $userUId,
                 'user_id' => $userId,
                 'subscription_id' => $saved->id,
                 'total' => $amount,
@@ -631,6 +727,65 @@ class SubscriptionController extends AppPluginController {
         if (!empty($user->uid)) {
             shell_exec(env('COMMAND_PATH', '') . ' subscriptions ' . $user->uid . ' > /dev/null 2>&1 &');
         }
+
+        if(!$user ){
+            $user_id = $userId;
+            $user_uid = $userUId;
+
+            $key1 = Text::uuid();
+            $key2 = md5(Text::uuid());
+
+            // Store key1 and key2 in sys_intent_recover so WordPress recover.php can validate the reset link
+            $this->loadModel('SpaLiveV1.SysIntentRecover');
+            $array_save = array(
+                'user_id' => $user_id,
+                'key1' => $key1,
+                'key2' => $key2,
+                'active' => 1,
+            );
+            $c_entity = $this->SysIntentRecover->newEntity($array_save);
+            if (!$c_entity->hasErrors()) {
+                $this->SysIntentRecover->save($c_entity);
+            }
+
+            $emailUser = $this->SysUsers->find()
+                ->where(['SysUsers.id' => $user_id])
+                ->first();
+
+            $resetLink = $this->URL_SITE . "recover.php?key1={$key1}&key2={$key2}";
+
+            // Send email via Mailgun (CakePHP Mailer uses PHP mail() which often fails on servers)
+            $mailgunKey = $this->getMailgunKey();
+
+            if ($mailgunKey && $emailUser && !empty($emailUser->email)) {
+                $emailBodyText = "Hello,\n\nClick the link below to create your password:\n\n" . $resetLink . "\n\nThank you.";
+                $emailBodyHtml = $this->reset_password_email_template($resetLink);
+                $data = [
+                    'from' => 'MySpaLive <noreply@mg.myspalive.com>',
+                    'to' => $emailUser->email,
+                    'subject' => 'Create Password',
+                    'text' => $emailBodyText,
+                    'html' => $emailBodyHtml,
+                ];
+                $curl = curl_init();
+                curl_setopt($curl, CURLOPT_URL, 'https://api.mailgun.net/v3/mg.myspalive.com/messages');
+                curl_setopt($curl, CURLOPT_HTTPAUTH, CURLAUTH_BASIC);
+                curl_setopt($curl, CURLOPT_USERPWD, 'api:' . $mailgunKey);
+                curl_setopt($curl, CURLOPT_RETURNTRANSFER, 1);
+                curl_setopt($curl, CURLOPT_CONNECTTIMEOUT, 10);
+                curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, 0);
+                curl_setopt($curl, CURLOPT_SSL_VERIFYHOST, 0);
+                curl_setopt($curl, CURLOPT_POST, true); 
+                curl_setopt($curl, CURLOPT_POSTFIELDS, $data);
+
+                $result = curl_exec($curl);
+                curl_close($curl);
+            }
+        }
+
+        // Success response
+        $this->set('success', true);
+        $this->set('message', 'Subscription Created successfully.');
 
         $this->success();
     }
@@ -12948,5 +13103,84 @@ if (isset($arr_subscriptions['membership_msl_iv'])) {
             $this->message($error);
             return;
         }
+    }
+
+    /**
+     * Generate a random alpha-numeric string (used by multiple controllers).
+     */
+    protected function generateRandomString(int $length = 8): string
+    {
+        $characters = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
+        $charactersLength = strlen($characters);
+        $randomString = '';
+
+        for ($i = 0; $i < $length; $i++) {
+            $randomString .= $characters[rand(0, $charactersLength - 1)];
+        }
+
+        return $randomString;
+    }
+
+
+    public function reset_password_email_template($resetLink){
+        $emailBodyHtml = '
+            <div style="font-family:Arial,Helvetica,sans-serif;background:#f4f6f8;padding:30px">
+            <div style="max-width:600px;margin:auto;background:#ffffff;border-radius:8px;padding:30px">
+
+                <h2 style="color:#1D6782;margin-top:0;">Welcome to MySpaLive 👋</h2>
+
+                <p>
+                Congratulations on enrolling! We\'re excited to have you onboard.
+                </p>
+
+                <div style="background:#eef6f9;padding:15px;border-radius:6px;margin-top:20px">
+                <strong>Next Step: Create Your Password</strong>
+                <p style="margin:10px 0 0 0;">
+                    To complete your onboarding process, please create your password using the link below.
+                </p>
+                </div>
+
+                <h3 style="margin-top:25px;color:#333;">How to Get Started</h3>
+
+                <ol style="line-height:1.6;color:#444">
+                <li>
+                    <strong>Create your MySpaLive password</strong><br>
+                    Click the button below to create your password.
+                </li>
+
+                <li style="margin-top:10px">
+                    <strong>Log in to your account</strong><br>
+                    Use your email and new password to access your training materials.
+                </li>
+                </ol>
+
+                <div style="text-align:center;margin:30px 0">
+                <a href="' . htmlspecialchars($resetLink) . '" 
+                    style="background:#1D6782;color:#ffffff;padding:14px 28px;
+                    text-decoration:none;border-radius:5px;font-weight:bold;">
+                    Create Your Password
+                </a>
+                </div>
+
+                <p style="font-size:14px;color:#666;">
+                If the button doesn’t work, copy and paste this link into your browser:
+                </p>
+
+                <p style="word-break:break-all;font-size:14px">
+                <a href="' . htmlspecialchars($resetLink) . '">' . htmlspecialchars($resetLink) . '</a>
+                </p>
+
+                <hr style="margin:30px 0;border:none;border-top:1px solid #eee">
+
+                <p style="font-size:13px;color:#777">
+                Need help? Contact us at 
+                <a href="mailto:support@port2pay.com">support@port2pay.com</a>
+                </p>
+
+            </div>
+            </div>
+        ';
+
+        return $emailBodyHtml;
     }
 }
