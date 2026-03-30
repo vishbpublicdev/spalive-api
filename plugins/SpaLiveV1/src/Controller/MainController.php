@@ -36515,7 +36515,39 @@ class MainController extends AppPluginController {
         }
 
         // Get training data
-        $training_id = get('training_id', 0);
+        // `training_id` is no longer used here; session is resolved by exact date + HH:MM.
+        $training_date = get('training_date', '');
+        $training_datetime = get('training_datetime', '');
+        $training_location = get('training_location', ''); // can be address or city
+        $training_city = get('training_city', '');
+        $training_state_id = get('training_state_id', get('training_state', 0));
+        $training_address = get('training_address', '');
+        $training_zip = get('training_zip', 0);
+        $training_level = get('training_level', ''); // optional hard filter (e.g. LEVEL 1)
+
+        $training_date_raw = !empty($training_date) ? $training_date : (!empty($training_datetime) ? $training_datetime : '');
+        $training_date_ymd = '';
+        if (!empty($training_date_raw)) {
+            // Support both YYYY-MM-DD and YYYY-MM-DD HH:mm:ss
+            if (preg_match('/^\d{4}-\d{2}-\d{2}/', $training_date_raw)) {
+                $training_date_ymd = substr($training_date_raw, 0, 10);
+            } else {
+                $training_date_ymd = date('Y-m-d', strtotime($training_date_raw));
+            }
+        }
+
+        // Build exact datetime match (minute precision) from incoming value.
+        $training_datetime_exact = '';
+        if (!empty($training_date_raw) && preg_match('/\d{2}:\d{2}/', $training_date_raw)) {
+            $ts = strtotime($training_date_raw);
+            if ($ts !== false) {
+                // Exact Y-m-d H:i:00 matching (minute precision).
+                $training_datetime_exact = date('Y-m-d H:i:00', $ts);
+            }
+        }
+
+        // Session matching city: use `training_city` if provided, otherwise reuse webhook `city`.
+        $session_city_exact = !empty($training_city) ? $training_city : (!empty($city) ? $city : '');
         
         // Validation
         if (empty($email)) {
@@ -36713,40 +36745,234 @@ class MainController extends AppPluginController {
             }
         }
 
-        // Create training enrollment (only if training_id is provided - matching normal flow)
-       /* if ($training_id > 0) {
-            // Check if already enrolled
-            $existing_enrollment = $this->DataTrainings->find()
-                ->where([
+        // Create training enrollment:
+        // - Resolve `cat_trainings` using exact datetime match (Y-m-d H:i).
+        $assigned_training_id = 0;
+        $assigned_training_level = '';
+
+        // Only run training-session assignment when exact minute datetime was provided.
+        $shouldAssignTraining = !empty($training_datetime_exact);
+
+        if ($shouldAssignTraining) {
+
+        // Resolve cat_trainings row
+        $catTraining = null;
+        // Exact minute matching only; no between/range matching.
+        $catQuery = $this->CatTrainings->find()
+            ->where([
+                'CatTrainings.deleted' => 0,
+                'CatTrainings.scheduled' => $training_datetime_exact,
+            ]);
+
+        // Keep optional filters when provided.
+        if (!empty($session_city_exact)) {
+            $catQuery->where(['CatTrainings.city' => trim($session_city_exact)]);
+        }
+
+        if (!empty($training_level)) {
+            $catQuery->where(['CatTrainings.level' => trim($training_level)]);
+        }
+        
+        $catTraining = $catQuery->order(['CatTrainings.scheduled' => 'ASC'])->first();
+      
+        if (empty($catTraining)) {
+            // Params were provided but no session matched: skip silently.
+            return [
+                'user_id' => $user_id,
+                'user_uid' => $user_uid,
+                'paymentEntity' => $paymentEntity,
+                'assigned_training_id' => 0,
+                'assigned_training_level' => '',
+            ];
+        }
+
+        $assigned_training_id = (int)$catTraining->id;
+        $assigned_training_level = (string)$catTraining->level;
+
+        // Check if already enrolled
+        $existing_enrollment = $this->DataTrainings->find()
+            ->where([
+                'DataTrainings.user_id' => $user_id,
+                'DataTrainings.training_id' => $assigned_training_id,
+                'DataTrainings.deleted' => 0
+            ])
+            ->first();
+
+        // Cancel previous pending training for the same level (if any)
+        $prev_pending = $this->DataTrainings->find()
+            ->join([
+                'CatTrainings' => [
+                    'table' => 'cat_trainings',
+                    'type' => 'INNER',
+                    'conditions' => 'CatTrainings.id = DataTrainings.training_id'
+                ]
+            ])
+            ->where([
+                'DataTrainings.user_id' => $user_id,
+                'DataTrainings.deleted' => 0,
+                'DataTrainings.attended' => 0,
+                'CatTrainings.deleted' => 0,
+                'CatTrainings.level' => $assigned_training_level,
+            ])
+            ->last();
+
+        if (!empty($prev_pending) && (int)$prev_pending->training_id !== $assigned_training_id) {
+            $this->DataTrainings->updateAll(
+                ['deleted' => 1],
+                ['id' => $prev_pending->id, 'user_id' => $user_id]
+            );
+        }
+
+        // Enroll user to selected training session (soft record)
+        if (empty($existing_enrollment)) {
+            $array_training = [
+                'user_id' => $user_id,
+                'training_id' => $assigned_training_id,
+                'deleted' => 0,
+                'attended' => 0,
+            ];
+
+            $trainingEntity = $this->DataTrainings->newEntity($array_training);
+            if ($trainingEntity->hasErrors()) {
+                $this->message('Training enrollment validation failed: ' . json_encode($trainingEntity->getErrors()));
+                $this->set('success', false);
+                //return false;
+            }
+
+            if (!$this->DataTrainings->save($trainingEntity)) {
+                $this->message('Failed to save training enrollment.');
+                $this->set('success', false);
+               //return false;
+            }
+        }
+
+        // Update seats / shared-seat related records (best-effort mimic of LoginController::join_training)
+        if ((int)$catTraining->shared_seats === 1) {
+            // Shared seats: create two additional pending training rows for AM/PM courses.
+            $sharedAm = (int)$catTraining->shared_am_course;
+            $sharedPm = (int)$catTraining->shared_pm_course;
+
+            if ($sharedAm > 0) {
+                $existAm = $this->DataTrainings->find()->where([
                     'DataTrainings.user_id' => $user_id,
-                    'DataTrainings.training_id' => $training_id,
-                    'DataTrainings.deleted' => 0
+                    'DataTrainings.training_id' => $sharedAm,
+                    'DataTrainings.deleted' => 0,
+                ])->first();
+                if (empty($existAm)) {
+                    $this->DataTrainings->save($this->DataTrainings->newEntity([
+                        'user_id' => $user_id,
+                        'training_id' => $sharedAm,
+                        'deleted' => 0,
+                        'attended' => 0,
+                        'deleted_by' => null,
+                        'deleted_date' => null,
+                    ]));
+                }
+            }
+
+            if ($sharedPm > 0) {
+                $existPm = $this->DataTrainings->find()->where([
+                    'DataTrainings.user_id' => $user_id,
+                    'DataTrainings.training_id' => $sharedPm,
+                    'DataTrainings.deleted' => 0,
+                ])->first();
+                if (empty($existPm)) {
+                    $this->DataTrainings->save($this->DataTrainings->newEntity([
+                        'user_id' => $user_id,
+                        'training_id' => $sharedPm,
+                        'deleted' => 0,
+                        'attended' => 0,
+                        'deleted_by' => null,
+                        'deleted_date' => null,
+                    ]));
+                }
+            }
+        } else {
+            // If this training is a shared AM/PM seat, decrement available seats by 1 (best-effort).
+            $shared_seat = $this->CatTrainings->find()
+                ->where([
+                    'OR' => [
+                        'CatTrainings.shared_am_course' => $assigned_training_id,
+                        'CatTrainings.shared_pm_course' => $assigned_training_id
+                    ],
+                    'CatTrainings.deleted' => 0
                 ])
                 ->first();
 
-            if (empty($existing_enrollment)) {
-                $array_training = array(
-                    'user_id' => $user_id,
-                    'training_id' => $training_id,
-                    'deleted' => 0,
-                    'attended' => 0,
+            if (!empty($shared_seat) && isset($shared_seat->available_seats)) {
+                $this->CatTrainings->updateAll(
+                    ['available_seats' => max(0, (int)$shared_seat->available_seats - 1)],
+                    ['id' => $shared_seat->id]
                 );
-
-                $trainingEntity = $this->DataTrainings->newEntity($array_training);
-                if (!$trainingEntity->hasErrors()) {
-                    $this->DataTrainings->save($trainingEntity);
-                } else {
-                    $this->message('Training enrollment validation failed: ' . json_encode($trainingEntity->getErrors()));
-                    $this->set('success', false);
-                    return;
-                }
             }
-        }*/
+        }
+
+        // Move user ahead: set steps + create injector registration record (mimic join_training)
+        $this->loadModel('SpaLiveV1.DataInjectorRegistered');
+        $userEntity = $this->SysUsers->find()
+            ->where(['SysUsers.id' => $user_id, 'SysUsers.deleted' => 0])
+            ->first();
+
+            if (!empty($userEntity)) {
+            $userEntity->last_status_change = date('Y-m-d H:i:s');
+
+            if ($assigned_training_level === 'LEVEL 1') {
+                $tempSteps = (string)$userEntity->steps;
+                $userEntity->steps = $tempSteps !== 'HOME' ? 'MATERIALS' : $tempSteps;
+                $this->SysUsers->save($userEntity);
+
+                $exist = $this->DataInjectorRegistered->find()->where([
+                    'DataInjectorRegistered.user_id' => $user_id,
+                    'DataInjectorRegistered.deleted' => 0,
+                ])->first();
+
+                if (empty($exist)) {
+                    $entity = $this->DataInjectorRegistered->newEntity([
+                        'user_id' => $user_id,
+                        'date_start' => date('Y-m-d H:i:s'),
+                        'type' => 'NEUROTOXIN',
+                        'deleted' => 0,
+                    ]);
+                    if (!$entity->hasErrors()) {
+                        $this->DataInjectorRegistered->save($entity);
+                    }
+                }
+            } elseif ($assigned_training_level !== 'LEVEL 2') {
+                // For LEVEL 3 and other non-LEVEL 2 courses
+               /* $tempSteps = (string)$userEntity->steps;
+                $userEntity->steps = $tempSteps !== 'HOME' ? 'MATERIALS' : $tempSteps;
+                $this->SysUsers->save($userEntity);
+
+                $exist = $this->DataInjectorRegistered->find()->where([
+                    'DataInjectorRegistered.user_id' => $user_id,
+                    'DataInjectorRegistered.deleted' => 0,
+                ])->first();
+
+                if (empty($exist)) {
+                    $entity = $this->DataInjectorRegistered->newEntity([
+                        'user_id' => $user_id,
+                        'date_start' => date('Y-m-d H:i:s'),
+                        'type' => 'OTHER_TREATMENTS',
+                        'deleted' => 0,
+                    ]);
+                    if (!$entity->hasErrors()) {
+                        $this->DataInjectorRegistered->save($entity);
+                    }
+                }*/
+            } else {
+                // LEVEL 2: join_training doesn't update steps (commented out there), keep as-is.
+               /*  $this->SysUsers->save($userEntity); */
+            }
+        }
+
+        }
 
         return [
             'user_id' => $user_id,
             'user_uid' => $user_uid,
             'paymentEntity' => $paymentEntity,
+            'assigned_training_id' => $assigned_training_id,
+            'assigned_training_level' => $assigned_training_level,
         ];
     }
 
