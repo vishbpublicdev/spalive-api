@@ -36852,66 +36852,7 @@ class MainController extends AppPluginController {
             }
         }
 
-        // Update seats / shared-seat related records (best-effort mimic of LoginController::join_training)
-        if ((int)$catTraining->shared_seats === 1) {
-            // Shared seats: create two additional pending training rows for AM/PM courses.
-            $sharedAm = (int)$catTraining->shared_am_course;
-            $sharedPm = (int)$catTraining->shared_pm_course;
-
-            if ($sharedAm > 0) {
-                $existAm = $this->DataTrainings->find()->where([
-                    'DataTrainings.user_id' => $user_id,
-                    'DataTrainings.training_id' => $sharedAm,
-                    'DataTrainings.deleted' => 0,
-                ])->first();
-                if (empty($existAm)) {
-                    $this->DataTrainings->save($this->DataTrainings->newEntity([
-                        'user_id' => $user_id,
-                        'training_id' => $sharedAm,
-                        'deleted' => 0,
-                        'attended' => 0,
-                        'deleted_by' => null,
-                        'deleted_date' => null,
-                    ]));
-                }
-            }
-
-            if ($sharedPm > 0) {
-                $existPm = $this->DataTrainings->find()->where([
-                    'DataTrainings.user_id' => $user_id,
-                    'DataTrainings.training_id' => $sharedPm,
-                    'DataTrainings.deleted' => 0,
-                ])->first();
-                if (empty($existPm)) {
-                    $this->DataTrainings->save($this->DataTrainings->newEntity([
-                        'user_id' => $user_id,
-                        'training_id' => $sharedPm,
-                        'deleted' => 0,
-                        'attended' => 0,
-                        'deleted_by' => null,
-                        'deleted_date' => null,
-                    ]));
-                }
-            }
-        } else {
-            // If this training is a shared AM/PM seat, decrement available seats by 1 (best-effort).
-            $shared_seat = $this->CatTrainings->find()
-                ->where([
-                    'OR' => [
-                        'CatTrainings.shared_am_course' => $assigned_training_id,
-                        'CatTrainings.shared_pm_course' => $assigned_training_id
-                    ],
-                    'CatTrainings.deleted' => 0
-                ])
-                ->first();
-
-            if (!empty($shared_seat) && isset($shared_seat->available_seats)) {
-                $this->CatTrainings->updateAll(
-                    ['available_seats' => max(0, (int)$shared_seat->available_seats - 1)],
-                    ['id' => $shared_seat->id]
-                );
-            }
-        }
+        // Shared-seat (AM/PM bundle) handling omitted: feature is no longer used; enrollment is only the session row above.
 
         // Move user ahead: set steps + create injector registration record (mimic join_training)
         $this->loadModel('SpaLiveV1.DataInjectorRegistered');
