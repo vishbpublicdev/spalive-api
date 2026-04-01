@@ -40,7 +40,7 @@ class MainController extends AppPluginController {
      
     private $total = 3900;
     private $paymente_gfe = 2500;
-    private $register_total = 79500;
+    private $register_total = 89500;
     private $register_refund = 3500;
     private $shipping_cost = 1000;
     private $shipping_cost_both = 4000;
@@ -3948,7 +3948,7 @@ class MainController extends AppPluginController {
 
         $this->loadModel('SpaLiveV1.SysUsers');
 
-        $email = get('email', '');
+        $email = strtolower(trim(get('email', '')));
         $name = get('name', '');
         $mname = get('mname', '');
         $lname = get('lname', '');
@@ -4345,7 +4345,7 @@ class MainController extends AppPluginController {
 
         $this->loadModel('SpaLiveV1.SysUsers');
 
-        $email = get('email', '');
+        $email = strtolower(trim(get('email', '')));
        
         if (empty($email)) {
             $this->message('Email address empty.');
@@ -6170,23 +6170,36 @@ class MainController extends AppPluginController {
 
     private function login_publicdata() {
         $post_data = array(
-            'login_id' => "MySpaLive",
-            'state_id' => "UID",
-            'password' => "P2024Eje"
+            'login_id' => env('PUBLICDATA_LOGIN_ID', 'MySpaLive'),
+            'state_id' => env('PUBLICDATA_STATE_ID', 'UID'),
+            'password' => env('PUBLICDATA_PASSWORD', 'P2024Eje'),
         );
         $curl = curl_init();
         curl_setopt($curl, CURLOPT_URL, "https://login.publicdata.com/pdmain.php/logon/checkAccess?disp=XML");
         curl_setopt($curl, CURLOPT_POST, true);
         curl_setopt($curl, CURLOPT_POSTFIELDS, $post_data);
         curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, true);
+        curl_setopt($curl, CURLOPT_TIMEOUT, 30);
         //Send CURL Request
         $result = curl_exec($curl);
+        $error = curl_error($curl);
         curl_close($curl);
+        if (!empty($error) || empty($result)) {
+            return false;
+        }
         $xml = simplexml_load_string($result, "SimpleXMLElement", LIBXML_NOCDATA);
+        if ($xml === false) {
+            return false;
+        }
         $json = json_encode($xml);
         $response_arr = json_decode($json, TRUE);
 
-        return $response_arr['user'];
+        if (isset($response_arr['@attributes']['type']) && $response_arr['@attributes']['type'] === 'error') {
+            return false;
+        }
+
+        return isset($response_arr['user']) ? $response_arr['user'] : false;
     }
 
     public function check_tracers($ent) {
@@ -6194,6 +6207,7 @@ class MainController extends AppPluginController {
         $this->loadModel('SpaLiveV1.SysUsers');
 
         $is_dev = env('IS_DEV', false);
+        $fail_open = (bool)env('PUBLICDATA_FAIL_OPEN', true);
 
         // if ($is_dev == true) {
         //    $response_json = '{"@attributes":{"type":"search","sitetype":"xml"},"pdheaders":{"pdheader2":"Results for "},"pdfooters":{"pdfooter0":"1 \"Look-up\" has been deducted from your account STAFFWIZARD-UID total on August 26, 2022 at 14:36:29."},"notes":[],"searchdata":{"@attributes":{"type":"ADVANCED","passthru":"","title":"Criminal Advanced - Name Search","dbcount":"1033","reccount":"1297916","db":"grp_cri_advanced_name","ed":"20220826060032"},"userinput":{"@attributes":{"searchstring":""},"p1":"","matchany":"ALL"},"searchgroup":"GRP_CRI_ADVANCED_NAME","dispfields":[],"searchpages":{"@attributes":{"ismore":"false"}}},"user":{"dlnumber":"STAFFWIZARD","dlstate":"UID","id":"9F96ACDB2730A25E1CA93C35F915614F","identifier":[],"sessionid":[]},"servers":{"searchserver":"login.publicdata.com","loginserver":"login.publicdata.com","mainserver":"login.publicdata.com"},"lookups":{"charged":"1","available":"7696"},"results":{"@attributes":{"ismore":"false","numrecords":"0"},"record":{"disp_fld":"No records found to match criteria"}},"numrecords":"0"}';
@@ -6250,6 +6264,9 @@ class MainController extends AppPluginController {
         // curl_close($curl);
 
         $publicdata_credentials = $this->login_publicdata();
+        if ($publicdata_credentials === false) {
+            return $fail_open;
+        }
 
         $result_search = false;
         $result_search2 = false;
@@ -6281,14 +6298,22 @@ class MainController extends AppPluginController {
         curl_setopt($curl, CURLOPT_POST, true);
         curl_setopt($curl, CURLOPT_POSTFIELDS, $post_data);
         curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, true);
+        curl_setopt($curl, CURLOPT_TIMEOUT, 30);
         //Send CURL Request
         $result = curl_exec($curl);
         $err = curl_error($curl);
         curl_close($curl);
         //$ci->common_model->add_record('hr_public_data_api_log', $log_data);
         //end
+        if (!empty($err) || empty($result)) {
+            return $fail_open;
+        }
         $xml = simplexml_load_string($result, "SimpleXMLElement", LIBXML_NOCDATA);
         //$xml = simplexml_load_string($xml);
+        if ($xml === false) {
+            return $fail_open;
+        }
         $json = json_encode($xml);
 
         $response_arr = json_decode($json, TRUE);
@@ -6311,7 +6336,7 @@ class MainController extends AppPluginController {
                     ['id' => $ent->id]
                 );
             }
-            if (isset($arr_response['isError'])) {
+            if (isset($response_arr['isError'])) {
                 $result_search = false;
             } else {
               if ($response) {
@@ -6343,14 +6368,22 @@ class MainController extends AppPluginController {
         curl_setopt($curl, CURLOPT_POST, true);
         curl_setopt($curl, CURLOPT_POSTFIELDS, $post_data);
         curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, true);
+        curl_setopt($curl, CURLOPT_TIMEOUT, 30);
         //Send CURL Request
         $result = curl_exec($curl);
         $err = curl_error($curl);
         curl_close($curl);
         //$ci->common_model->add_record('hr_public_data_api_log', $log_data);
         //end
+        if (!empty($err) || empty($result)) {
+            return $fail_open;
+        }
         $xml = simplexml_load_string($result, "SimpleXMLElement", LIBXML_NOCDATA);
         //$xml = simplexml_load_string($xml);
+        if ($xml === false) {
+            return $fail_open;
+        }
         $json = json_encode($xml);
 
         $response_arr = json_decode($json, TRUE);
@@ -6373,7 +6406,7 @@ class MainController extends AppPluginController {
                     ['id' => $ent->id]
                 );
             }
-            if (isset($arr_response['isError'])) {
+            if (isset($response_arr['isError'])) {
                 $result_search2 = false;
             } else {
               if ($response) {
@@ -6402,12 +6435,7 @@ class MainController extends AppPluginController {
 
         $ent_user = $this->SysUsers->find()->where(['SysUsers.uid' => $uid])->first();
 
-        /* --- COMMENTED OUT FOR NOW - BACKGROUND CHECK DISABLED START --*/
-        //$result = $this->check_tracers($ent_user);
-        /* COMMENTED OUT FOR NOW - BACKGROUND CHECK DISABLED END --- */
-
-        // Always return true (background check bypassed)
-        $result = true;
+        $result = $this->check_tracers($ent_user);
         echo $result;
     }
  
@@ -8808,19 +8836,15 @@ class MainController extends AppPluginController {
                 if(!$c_entity->hasErrors()) {
                     if ($this->SysUsers->save($c_entity)) {
 
-                         /* --- COMMENTED OUT FOR NOW - BACKGROUND CHECK DISABLED START --*/
                         if ($ent_user->type == "injector") {
-                          /*  // if (empty($ent_user->tracers)) {
+                            if (empty($ent_user->tracers)) {
                                 $background_check = $this->check_tracers($ent_user);
                                 if ($background_check) {
                                     $this->auto_approve($ent_user->id);
                                 }
-                            // }    */ 
-                            
-                            $this->auto_approve($ent_user->id);
+                            }
 
                         }
-                        /* COMMENTED OUT FOR NOW - BACKGROUND CHECK DISABLED END --- */
 
 
 
@@ -20210,6 +20234,9 @@ class MainController extends AppPluginController {
             $shipping_cost = 0;
         }
 
+        // Single training/course line: no Stripe pass-through fee (shop/certifications course purchase).
+        $singleTrainingCheckout = ($is_training && count($arr_products) <= 1);
+
         $purchase_uid = Text::uuid();
         $array_save = array(
             'uid' => $purchase_uid,
@@ -20250,10 +20277,15 @@ class MainController extends AppPluginController {
 
                 if($elite_discount){
                     $grand_total = $total_elite + $grand_total;
-                    $stripe_fee = round(($grand_total + $shipping_cost) * 0.0315);
-    
-                    $this->set('grand_total', $grand_total + $shipping_cost + $stripe_fee);
-                    $this->set('stripe_fee', $stripe_fee);
+                    if ($singleTrainingCheckout) {
+                        $stripe_fee = 0;
+                        $this->set('grand_total', $grand_total + $shipping_cost);
+                        $this->set('stripe_fee', 0);
+                    } else {
+                        $stripe_fee = round(($grand_total + $shipping_cost) * 0.0315);
+                        $this->set('grand_total', $grand_total + $shipping_cost + $stripe_fee);
+                        $this->set('stripe_fee', $stripe_fee);
+                    }
                     $this->set('shipping_cost', intval($shipping_cost));
                     $this->set('discount_text', $discount_text);
                     $this->set('discount_amount', intval($total_discount_elite));
@@ -20261,10 +20293,15 @@ class MainController extends AppPluginController {
                     $this->set('cart', $arr_cart);
                     $this->success();
                 }else{
-                    $stripe_fee = round(($grand_total + $shipping_cost) * 0.0315);
-    
-                    $this->set('grand_total', $grand_total + $shipping_cost + $stripe_fee);
-                    $this->set('stripe_fee', $stripe_fee);
+                    if ($singleTrainingCheckout) {
+                        $stripe_fee = 0;
+                        $this->set('grand_total', $grand_total + $shipping_cost);
+                        $this->set('stripe_fee', 0);
+                    } else {
+                        $stripe_fee = round(($grand_total + $shipping_cost) * 0.0315);
+                        $this->set('grand_total', $grand_total + $shipping_cost + $stripe_fee);
+                        $this->set('stripe_fee', $stripe_fee);
+                    }
                     $this->set('shipping_cost', intval($shipping_cost));
                     $this->set('cart', $arr_cart);
                     $this->success();
@@ -34522,7 +34559,7 @@ class MainController extends AppPluginController {
     }
 
     public function download_model_list(){
-        $training_id = get('training_id', 0);
+        $training_id = intval(get('training_id', 0));
         $return_path = false;
         if($training_id == 0){
             return;
@@ -36446,23 +36483,23 @@ class MainController extends AppPluginController {
         $mname = get('mname', '');
         $lname = get('lname', '');
         $phone = get('phone', '');
-        $state_id = get('state', 0);
+        $state_input = trim((string)get('state', ''));
+        $state_id = 43;
         $city = get('city', '');
         $street = get('street', '');
         $suite = get('suite', '');
-        $zip = get('zip', 0);
+        $zip = intval(get('zip', 0));
         $dob = get('dob', '2002-01-01');
-        $user_type = get('user_type', 'injector'); // Default to injector
+        $user_type = 'injector';
 
         // Get payment data
-        $payment_amount = get('payment_amount', 0);
-        $payment_intent = get('payment_intent', '');
-        $charge_id = get('charge_id', '');
-        $receipt_url = get('receipt_url', '');
+        $payment_amount = intval(get('payment_amount', 0));
+        $payment_intent = trim(get('payment_intent', ''));
+        $charge_id = trim(get('charge_id', ''));
+        $installments = intval(get('installments', get('payment_count', 0)));
         
         // Get course type - accept both 'type_course' (normal flow) or 'course_type' (direct value)
-        $type_course = get('type_course', '');
-        //$course_type = get('course_type', '');
+        $type_course = strtoupper(trim(get('type_course', get('course_key', get('course_type', '')))));
         
         // Map course name to payment type (same logic as payment_intent_course())
         $type_string = '';
@@ -36470,55 +36507,58 @@ class MainController extends AppPluginController {
             // Normal flow: map course name to payment type
             switch ($type_course) {
                 case 'COURSE_BASIC':
+                case 'BASIC':
+                case 'BASIC COURSE':
+                case 'NEUROTOXINS BASIC':
                     $type_string = 'BASIC COURSE';
                     break;
                 case 'COURSE_ADVANCED':
+                case 'ADVANCED':
+                case 'ADVANCED COURSE':
+                case 'NEUROTOXINS ADVANCED':
                     $type_string = 'ADVANCED COURSE';
-                    break;                    
+                    break;
+                case 'COURSE_LEVEL3':
+                case 'LEVEL3':
+                case 'LEVEL 3':
+                case 'ADVANCED TECHNIQUES MEDICAL':
+                    $type_string = 'ADVANCED TECHNIQUES MEDICAL';
+                    break;
                 case 'COURSE_DERMAPLANNING':
-                    $type_string = 'DERMAPLANING_PEEL_MICRONEEDLING_COURSE';
-                    break;
-                case 'COURSE_HYBRID_TOX_FILLER_LIVE':
-                    $type_string = 'MYSPALIVES_HYBRID_TOX_FILLER_COURSE';
-                    break;
-                case 'COURSE_HYBRID_TOX_FILLER_LIVE_LEVEL_2':
-                    $type_string = 'MYSPALIVES_HYBRID_TOX_FILLER_COURSE_LEVEL_2';
+                    $type_string = 'DERMAPLANING_PEEL_COURSE';
                     break;
                 case 'COURSE_DERMAPLANNING_LIVE':
-                    $type_string = 'DERMAPLANING_PEEL_MICRONEEDLING';                    
+                    $type_string = 'DERMAPLANING_PEEL_MICRONEEDLING';
                     break;
                 case 'COURSE_HYBRID_TOX_FILLER':
-                    $type_string = 'MYSPALIVE_S_HYBRID_TOX_FILLER_COURSE';
-                    break;                
+                case 'COURSE_HYBRID_TOX_FILLER_LIVE':
+                case 'MYSPALIVES_HYBRID_TOX_FILLER_COURSE':
+                    $type_string = 'MYSPALIVES_HYBRID_TOX_FILLER_COURSE';
+                    break;
+                case 'COURSE_FILLERS_LEVEL_1':
+                case 'FILLER_COURSE_LEVEL_1':
+                    $type_string = 'FILLER_COURSE_LEVEL_1';
+                    break;
+                case 'COURSE_FILLERS_LEVEL_2':
+                case 'FILLER_COURSE_LEVEL_2':
+                    $type_string = 'FILLER_COURSE_LEVEL_2';
+                    break;
                 default:
-                    $type_string = 'OTHER TREATMENTS';
+                    $type_string = 'UNKNOWN';
                     break;
             }
         } 
         
         // Subtotal before discounts (original course price).
-        $subtotal = get('subtotal', $payment_amount);
+        $subtotal = intval(get('subtotal', get('amount_subtotal', $payment_amount)));
+        $provided_total = intval(get('total', get('amount_total', $payment_amount)));
+        if ($provided_total > 0) {
+            $payment_amount = $provided_total;
+        }
 
        
         $promo_code = strtoupper(get('promo_code', ''));
         $promo_discount = 0;
-        if (!empty($promo_code)) {
-            // Use a concrete promo category that matches DataPromoCodes.category
-            $promo_category = 'REGISTER';
-            $total_after = $this->validateCode($promo_code, $subtotal, $promo_category);
-
-            if ($this->getParams('code_valid')) {
-                // Discount percentage already calculated by validateCode()
-                $promo_discount = $this->getParams('discount');
-                // Update final charged total to the discounted amount.
-                $payment_amount = $total_after;
-            } else {
-                // If code is invalid, stop the flow and return an error.
-                $this->message('Invalid promo code.');
-                $this->set('success', false);
-                return false;
-            }
-        }
 
         // Get training data
         // `training_id` is no longer used here; session is resolved by exact date + HH:MM.
@@ -36562,12 +36602,6 @@ class MainController extends AppPluginController {
             return;
         }
 
-        if (empty($name) || empty($lname)) {
-            $this->message('Name and last name are required.');
-            $this->set('success', false);
-            return;
-        }
-
         if (empty($payment_intent) || empty($charge_id)) {
             $this->message('Payment intent and charge ID are required.');
             $this->set('success', false);
@@ -36599,19 +36633,33 @@ class MainController extends AppPluginController {
             }
         } */
 
-        // Validate state if provided
-       /*  if ($state_id > 0) {
-            $state_exists = $this->CatStates->exists(['CatStates.id' => $state_id, 'CatStates.deleted' => 0]);
-            if (!$state_exists) {
-                $this->message('Invalid state ID.');
-                $this->set('success', false);
-                return;
+        // Resolve state for the payment/user. If invalid or missing, default to Texas (43).
+        if (!empty($state_input)) {
+            if (ctype_digit($state_input)) {
+                $candidate_state = intval($state_input);
+                $state_exists = $this->CatStates->exists(['CatStates.id' => $candidate_state, 'CatStates.deleted' => 0]);
+                if ($state_exists) {
+                    $state_id = $candidate_state;
+                }
+            } else {
+                $state_entity = $this->CatStates->find()
+                    ->where([
+                        'CatStates.deleted' => 0,
+                        'OR' => [
+                            'UPPER(CatStates.name)' => strtoupper($state_input),
+                            'UPPER(CatStates.abv)' => strtoupper($state_input),
+                        ],
+                    ])
+                    ->first();
+                if (!empty($state_entity)) {
+                    $state_id = intval($state_entity->id);
+                }
             }
-        } */
+        }
 
         // Find or create user
         $existUser = $this->SysUsers->find()
-            ->where(['SysUsers.email LIKE' => strtolower(trim($email))])
+            ->where(['SysUsers.email LIKE' => $email])
             ->first();
 
         $user_id = 0;
@@ -36626,6 +36674,11 @@ class MainController extends AppPluginController {
 
         } else {
             // Create new user
+            if (empty($name) || empty($lname)) {
+                $this->message('Name and last name are required to create a new user.');
+                $this->set('success', false);
+                return false;
+            }
             $arr_dob = explode("-", $dob);
             $str_dob = "";
             
@@ -36663,7 +36716,7 @@ class MainController extends AppPluginController {
                 'name' => trim($name),
                 'mname' => trim($mname),
                 'lname' => trim($lname),
-                'email' => trim(strtolower($email)),
+                'email' => $email,
                 'phone' => $phone,
                 'type' => $user_type,
                 'state' => $state_id > 0 ? $state_id : 43, // Default state if not provided
@@ -36708,7 +36761,8 @@ class MainController extends AppPluginController {
             ->where([
                 'DataPayment.id_from' => $user_id,
                 'DataPayment.intent' => $payment_intent,
-                'DataPayment.payment' => $charge_id
+                'DataPayment.payment' => $charge_id,
+                'DataPayment.type' => $type_string,
             ])
             ->first();
 
@@ -36718,14 +36772,21 @@ class MainController extends AppPluginController {
         } else {
             // Create payment record
             $payment_uid = Text::uuid();
+            $created_at = date('Y-m-d H:i:s');
+            $extra_data = [
+                'source' => 'port2pay',
+                'course_key' => $type_course,
+                'installments' => $installments,
+            ];
             $array_payment = array(
                 'id_from' => $user_id,
                 'id_to' => 0,
-                'uid' => $user_uid,
+                'uid' => $payment_uid,
+                'service_uid' => '',
                 'type' => $type_string, 
                 'intent' => $payment_intent,
                 'payment' => $charge_id,
-                'receipt' => $receipt_url,
+                'receipt' => '',
                 'discount_credits' => 0,
                 'promo_discount' => $promo_discount,
                 'promo_code' => $promo_code,
@@ -36736,9 +36797,13 @@ class MainController extends AppPluginController {
                 'comission_payed' => 1,
                 'comission_generated' => 0,
                 'prepaid' => 0,
-                'created' => date('Y-m-d H:i:s'),
+                'refund_id' => 0,
+                'transfer' => '',
+                'created' => $created_at,
                 'createdby' => $user_id,
-                'state' => $state_id > 0 ? $state_id : 43,
+                'state' => $state_id,
+                'payment_platform' => 'port2pay',
+                'comments' => json_encode($extra_data),
             );
 
             $paymentEntity = $this->DataPayment->newEntity($array_payment);
@@ -36921,6 +36986,398 @@ class MainController extends AppPluginController {
             'assigned_training_id' => $assigned_training_id,
             'assigned_training_level' => $assigned_training_level,
         ];
+    }
+
+    /**
+     * External payment confirmation for Level 2 (Advanced Course).
+     * Stores ADVANCED COURSE payment in data_payment - same tables as Partially/Affirm flows.
+     *
+     * Auth:
+     * - api_key: must match Configure::read('App.external_api_key')
+     *
+     * Params:
+     * - email: User email (required - user must exist)
+     * - payment_amount: Amount charged in cents (required)
+     * - payment_intent: Payment intent ID (required)
+     * - charge_id: Charge ID (required)
+     * - receipt_url: Receipt URL (optional)
+     * - subtotal: Subtotal before discount (optional, defaults to payment_amount)
+     * - promo_code: Promo code (optional, category TRAINING)
+     * - state: State ID (optional)
+     * - api_key: API key for authentication (required)
+     */
+    public function add_external_payment_confirmation_level2() {
+        $this->loadModel('SpaLiveV1.SysUsers');
+        $this->loadModel('SpaLiveV1.DataPayment');
+
+        // API key authentication
+        $api_key = get('api_key', '');
+        $expected_api_key = Configure::read('App.external_api_key', '');
+        if (empty($expected_api_key) || $api_key !== $expected_api_key) {
+            $this->message('Invalid API key.');
+            $this->set('success', false);
+            return false;
+        }
+
+        $email = get('email', '');
+        $payment_amount = get('payment_amount', 0);
+        $payment_intent = get('payment_intent', '');
+        $charge_id = get('charge_id', '');
+        $receipt_url = get('receipt_url', '');
+        $subtotal = get('subtotal', $payment_amount);
+        $state_id = get('state', 0);
+
+        $promo_code = strtoupper(get('promo_code', ''));
+        $promo_discount = 0;
+        if (!empty($promo_code)) {
+            $promo_category = 'TRAINING';
+            $total_after = $this->validateCode($promo_code, $subtotal, $promo_category);
+            if ($this->getParams('code_valid')) {
+                $promo_discount = $this->getParams('discount');
+                $payment_amount = $total_after;
+            } else {
+                $this->message('Invalid promo code.');
+                $this->set('success', false);
+                return false;
+            }
+        }
+
+        if (empty($email)) {
+            $this->message('Email is required.');
+            $this->set('success', false);
+            return false;
+        }
+        if (empty($payment_intent) || empty($charge_id)) {
+            $this->message('Payment intent and charge ID are required.');
+            $this->set('success', false);
+            return false;
+        }
+        if ($payment_amount <= 0) {
+            $this->message('Payment amount must be greater than 0.');
+            $this->set('success', false);
+            return false;
+        }
+
+        $existUser = $this->SysUsers->find()
+            ->where(['SysUsers.email LIKE' => strtolower(trim($email)), 'SysUsers.deleted' => 0])
+            ->first();
+
+        if (empty($existUser)) {
+            $this->message('User not found. Level 2 requires an existing account.');
+            $this->set('success', false);
+            return false;
+        }
+
+        $user_id = $existUser->id;
+        $user_uid = $existUser->uid;
+
+        // Check if payment already exists (prevent duplicates)
+        $existing_payment = $this->DataPayment->find()
+            ->where([
+                'DataPayment.id_from' => $user_id,
+                'DataPayment.intent' => $payment_intent,
+                'DataPayment.payment' => $charge_id,
+                'DataPayment.type' => 'ADVANCED COURSE',
+            ])
+            ->first();
+
+        if (!empty($existing_payment)) {
+            return [
+                'user_id' => $user_id,
+                'user_uid' => $user_uid,
+                'paymentEntity' => $existing_payment,
+            ];
+        }
+
+        // Check if user already has ADVANCED COURSE payment (avoid duplicates by charge)
+        $twice_pay = $this->DataPayment->find()
+            ->where([
+                'DataPayment.id_from' => $user_id,
+                'DataPayment.is_visible' => 1,
+                'DataPayment.payment <>' => '',
+                'DataPayment.type' => 'ADVANCED COURSE',
+                'DataPayment.service_uid' => '',
+                'DataPayment.refund_id' => 0,
+            ])
+            ->first();
+        if (!empty($twice_pay)) {
+            $this->message('You have already paid for the advanced course.');
+            $this->set('success', false);
+            return false;
+        }
+
+        $payment_uid = Text::uuid();
+        $array_payment = [
+            'id_from' => $user_id,
+            'id_to' => 0,
+            'uid' => $payment_uid,
+            'service_uid' => '',
+            'type' => 'ADVANCED COURSE',
+            'intent' => $payment_intent,
+            'payment' => $charge_id,
+            'receipt' => $receipt_url,
+            'discount_credits' => 0,
+            'promo_discount' => $promo_discount,
+            'promo_code' => $promo_code,
+            'subtotal' => $subtotal,
+            'total' => $payment_amount,
+            'prod' => 1,
+            'is_visible' => 1,
+            'comission_payed' => 1,
+            'comission_generated' => 0,
+            'prepaid' => 0,
+            'refund_id' => 0,
+            'transfer' => '',
+            'created' => date('Y-m-d H:i:s'),
+            'createdby' => $user_id,
+            'state' => $state_id > 0 ? $state_id : ($existUser->state ?? 43),
+        ];
+
+        $paymentEntity = $this->DataPayment->newEntity($array_payment);
+        if (!$paymentEntity->hasErrors()) {
+            $this->DataPayment->save($paymentEntity);
+        } else {
+            $this->message('Payment validation failed: ' . json_encode($paymentEntity->getErrors()));
+            $this->set('success', false);
+            return false;
+        }
+
+        // Match Partially/Affirm flow: send post-purchase notification for ADVANCED COURSE
+        $this->notify_devices('AFTER_BUY_BASIC_COURSE_EN', [$user_id], false, true);
+
+        return [
+            'user_id' => $user_id,
+            'user_uid' => $user_uid,
+            'paymentEntity' => $paymentEntity,
+        ];
+    }
+
+    /**
+     * Public entry point for external Level 2 payment confirmation.
+     */
+    public function external_payment_confirmation_level2() {
+        $result = $this->add_external_payment_confirmation_level2();
+        if ($result === false) {
+            return;
+        }
+        $this->set('success', true);
+        $this->set('user_id', $result['user_id']);
+        $this->set('user_uid', $result['user_uid']);
+        $this->set('payment_id', $result['paymentEntity']->id);
+        $this->set('message', 'Level 2 (Advanced Course) payment processed successfully.');
+        $this->success();
+    }
+
+    /**
+     * Stores external course purchases (Port2Pay) for existing users.
+     *
+     * Auth:
+     * - api_key: must match Configure::read('App.external_api_key')
+     *
+     * Params:
+     * - email: User email (required - user must exist)
+     * - course_key: Course key from Port2Pay (required)
+     *               Examples: COURSE_BASIC, COURSE_ADVANCED, COURSE_LEVEL3, COURSE_OTHER
+     * - payment_intent: External payment intent/reference (required)
+     * - charge_id: External charge/transaction ID (required)
+     * - subtotal: Subtotal before discounts (required)
+     * - total: Total charged amount (required)
+     * - promo_code: Promo code used (optional)
+     * - paid_at: Payment datetime (optional, format Y-m-d H:i:s)
+     * - state: State ID (optional)
+     * - service_uid: External service UID/reference (optional)
+     * - installments: Number of payments/installments (optional)
+     * - card_brand: Card brand used (optional)
+     * - card_last4: Card last 4 digits (optional)
+     * - receipt_url: Receipt URL (optional)
+     */
+    public function add_external_course_payment_confirmation() {
+        $this->loadModel('SpaLiveV1.SysUsers');
+        $this->loadModel('SpaLiveV1.DataPayment');
+
+        $api_key = get('api_key', '');
+        $expected_api_key = Configure::read('App.external_api_key', '');
+        if (empty($expected_api_key) || $api_key !== $expected_api_key) {
+            $this->message('Invalid API key.');
+            $this->set('success', false);
+            return false;
+        }
+
+        $email = strtolower(trim(get('email', '')));
+        $course_key = strtoupper(trim(get('course_key', get('type_course', ''))));
+        $payment_intent = trim(get('payment_intent', ''));
+        $charge_id = trim(get('charge_id', ''));
+        $subtotal = intval(get('subtotal', 0));
+        $total = intval(get('total', 0));
+        $promo_code = strtoupper(trim(get('promo_code', '')));
+        $state_id = intval(get('state', 0));
+        $service_uid = trim(get('service_uid', ''));
+        $installments = intval(get('installments', 0));
+        $card_brand = trim(get('card_brand', ''));
+        $card_last4 = trim(get('card_last4', ''));
+        $receipt_url = trim(get('receipt_url', ''));
+        $paid_at = trim(get('paid_at', ''));
+
+        // Optional compatibility aliases for external integrations.
+        if ($total <= 0) {
+            $total = intval(get('payment_amount', 0));
+        }
+        if ($subtotal <= 0) {
+            $subtotal = intval(get('amount_subtotal', $total));
+        }
+
+        if (empty($email)) {
+            $this->message('Email is required.');
+            $this->set('success', false);
+            return false;
+        }
+        if (empty($course_key)) {
+            $this->message('course_key is required.');
+            $this->set('success', false);
+            return false;
+        }
+        if (empty($payment_intent) || empty($charge_id)) {
+            $this->message('Payment intent and charge ID are required.');
+            $this->set('success', false);
+            return false;
+        }
+        if ($subtotal <= 0 || $total <= 0) {
+            $this->message('Subtotal and total must be greater than 0.');
+            $this->set('success', false);
+            return false;
+        }
+
+        $course_type_map = [
+            'COURSE_BASIC' => 'BASIC COURSE',
+            'BASIC' => 'BASIC COURSE',
+            'BASIC COURSE' => 'BASIC COURSE',
+            'COURSE_ADVANCED' => 'ADVANCED COURSE',
+            'ADVANCED' => 'ADVANCED COURSE',
+            'ADVANCED COURSE' => 'ADVANCED COURSE',
+            'COURSE_LEVEL3' => 'ADVANCED TECHNIQUES MEDICAL',
+            'LEVEL3' => 'ADVANCED TECHNIQUES MEDICAL',
+            'LEVEL 3' => 'ADVANCED TECHNIQUES MEDICAL',
+            'ADVANCED TECHNIQUES MEDICAL' => 'ADVANCED TECHNIQUES MEDICAL',
+            'COURSE_FILLERS_LEVEL_1' => 'FILLER_COURSE_LEVEL_1',
+            'FILLER_COURSE_LEVEL_1' => 'FILLER_COURSE_LEVEL_1',
+            'COURSE_FILLERS_LEVEL_2' => 'FILLER_COURSE_LEVEL_2',
+            'FILLER_COURSE_LEVEL_2' => 'FILLER_COURSE_LEVEL_2',
+            'COURSE_OTHER' => 'UNKNOWN',
+            'OTHER' => 'UNKNOWN',
+        ];
+
+        if (!isset($course_type_map[$course_key])) {
+            $this->message('Invalid course_key. Allowed keys: COURSE_BASIC, COURSE_ADVANCED, COURSE_LEVEL3, COURSE_FILLERS_LEVEL_1, COURSE_OTHER.');
+            $this->set('success', false);
+            return false;
+        }
+
+        $type_string = $course_type_map[$course_key];
+
+        $existUser = $this->SysUsers->find()
+            ->where(['SysUsers.email LIKE' => $email, 'SysUsers.deleted' => 0])
+            ->first();
+
+        if (empty($existUser)) {
+            $this->message('User not found for provided email.');
+            $this->set('success', false);
+            return false;
+        }
+
+        $created_at = date('Y-m-d H:i:s');
+        if (!empty($paid_at)) {
+            $paid_at_unix = strtotime($paid_at);
+            if ($paid_at_unix !== false) {
+                $created_at = date('Y-m-d H:i:s', $paid_at_unix);
+            }
+        }
+
+        // Prevent duplicate records when Port2Pay retries notifications.
+        $existing_payment = $this->DataPayment->find()
+            ->where([
+                'DataPayment.id_from' => $existUser->id,
+                'DataPayment.intent' => $payment_intent,
+                'DataPayment.payment' => $charge_id,
+                'DataPayment.type' => $type_string,
+            ])
+            ->first();
+
+        if (!empty($existing_payment)) {
+            return [
+                'user_id' => $existUser->id,
+                'user_uid' => $existUser->uid,
+                'paymentEntity' => $existing_payment,
+            ];
+        }
+
+        $comments_payload = [
+            'source' => 'port2pay',
+            'course_key' => $course_key,
+            'installments' => $installments,
+            'card_brand' => $card_brand,
+            'card_last4' => $card_last4,
+        ];
+
+        $array_payment = [
+            'id_from' => $existUser->id,
+            'id_to' => 0,
+            'uid' => Text::uuid(),
+            'service_uid' => $service_uid,
+            'type' => $type_string,
+            'intent' => $payment_intent,
+            'payment' => $charge_id,
+            'receipt' => $receipt_url,
+            'discount_credits' => 0,
+            'promo_discount' => 0,
+            'promo_code' => $promo_code,
+            'subtotal' => $subtotal,
+            'total' => $total,
+            'prod' => 1,
+            'is_visible' => 1,
+            'comission_payed' => 1,
+            'comission_generated' => 0,
+            'prepaid' => 0,
+            'refund_id' => 0,
+            'transfer' => '',
+            'created' => $created_at,
+            'createdby' => $existUser->id,
+            'state' => $state_id > 0 ? $state_id : ($existUser->state ?? 43),
+            'payment_platform' => 'port2pay',
+            'comments' => json_encode($comments_payload),
+        ];
+
+        $paymentEntity = $this->DataPayment->newEntity($array_payment);
+        if ($paymentEntity->hasErrors()) {
+            $this->message('Payment validation failed: ' . json_encode($paymentEntity->getErrors()));
+            $this->set('success', false);
+            return false;
+        }
+
+        if (!$this->DataPayment->save($paymentEntity)) {
+            $this->message('Failed to save external course payment.');
+            $this->set('success', false);
+            return false;
+        }
+
+        return [
+            'user_id' => $existUser->id,
+            'user_uid' => $existUser->uid,
+            'paymentEntity' => $paymentEntity,
+        ];
+    }
+
+    public function external_course_payment_confirmation() {
+        $result = $this->add_external_course_payment_confirmation();
+        if ($result === false) {
+            return;
+        }
+
+        $this->set('success', true);
+        $this->set('user_id', $result['user_id']);
+        $this->set('user_uid', $result['user_uid']);
+        $this->set('payment_id', $result['paymentEntity']->id);
+        $this->set('message', 'External course payment processed successfully.');
+        $this->success();
     }
 
     public function reset_password_email_template($resetLink){
