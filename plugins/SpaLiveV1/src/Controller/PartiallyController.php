@@ -188,8 +188,8 @@ class PartiallyController extends AppPluginController {
             'type'              => $course,
             'promo_discount'    => 0,
             'promo_code'        => $promo_code,
-            'subtotal'          => 10000,//$total,
-            'total'             => 10000,//$total,
+            'subtotal'          => $total,
+            'total'             => $total,
             'prod'              => 1,
             'is_visible'        => $this->is_dev ? 1 : 0,
             'payment_platform'  => 'partially',
@@ -958,6 +958,17 @@ class PartiallyController extends AppPluginController {
                         )
                     ];
                 }
+            }
+            // Waiting screen lists line items from details["products"]; keep one row if nothing matched above.
+            if (empty($details["products"]) && !empty($payment->type)) {
+                $label = str_replace('_', ' ', (string)$payment->type);
+                $details["products"] = [
+                    array(
+                        "name" => $label,
+                        "price" => $total,
+                        "qty" => 1
+                    ),
+                ];
             }
             $details["subtotal"]    = $total;
             $details["total"]       = $total;
@@ -2313,8 +2324,8 @@ class PartiallyController extends AppPluginController {
             'type'              => $course,
             'promo_discount'    => 0,
             'promo_code'        => $promo_code,
-            'subtotal'          => 10000,//$total,
-            'total'             => 10000,//$total,
+            'subtotal'          => $total,
+            'total'             => $total,
             'prod'              => 1,
             'is_visible'        => $this->is_dev ? 1 : 0,
             'payment_platform'  => 'partially',

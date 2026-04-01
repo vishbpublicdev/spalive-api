@@ -48,7 +48,7 @@ class SummaryController extends AppPluginController{
     private $shipping_cost_mat = 1000;
     private $shipping_cost_misc = 1000;
     private $training_advanced = 89500;
-    private $emergencyPhone = "(972) 755 3038, (847) 477 5791";//"9035301512";
+    private $emergencyPhone = "(469) 277 0897, (847) 477 5791";//"9035301512";
     private $emergencyPhone2 = "(847) 477 5791,(812) 322 8388";// "8474775791";
     private $total_subscriptionmsl = 3995;
     private $total_subscriptionmd = 17900;

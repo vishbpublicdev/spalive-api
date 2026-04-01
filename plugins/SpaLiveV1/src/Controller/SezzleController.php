@@ -723,8 +723,7 @@ class SezzleController extends AppPluginController {
                   }
 
                   if ($ent_user->type == "injector") {
-                     /* --- COMMENTED OUT FOR NOW - BACKGROUND CHECK DISABLED START --*/
-                   /* $background_check = false;
+                    $background_check = false;
                     $is_dev = env('IS_DEV', false);
                     if ($is_dev == false) {
                         if (empty($ent_user->tracers)) {
@@ -735,11 +734,7 @@ class SezzleController extends AppPluginController {
                         }        
                     } else {
                         $Main->auto_approve($ent_user->id);                            
-                    } */
-                     /* COMMENTED OUT FOR NOW - BACKGROUND CHECK DISABLED END --- */
-
-                     // Always auto-approve injectors after payment (background check bypassed)
-                    $Main->auto_approve($ent_user->id);
+                    }
 
                   }
 

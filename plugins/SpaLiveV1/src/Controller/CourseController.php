@@ -34,14 +34,15 @@ class CourseController extends AppPluginController {
      
     private $total = 3900;
     private $paymente_gfe = 1800;
-    private $register_total = 79500;
+    // Defaults aligned with LoginController / PaymentsController (cents). cost_ci / cat_products override in initialize().
+    private $register_total = 89500;
     private $register_refund = 3500;
     private $shipping_cost = 1000;
     private $shipping_cost_both = 3000;
     private $shipping_cost_inj = 2000;
     private $shipping_cost_mat = 1000;
     private $shipping_cost_misc = 1000;
-    private $training_basic = 79500;
+    private $training_basic = 89500;
     private $training_advanced = 89500;
     private $emergencyPhone = "9035301512";
     private $total_subscriptionmsl = 3995;
@@ -122,6 +123,9 @@ class CourseController extends AppPluginController {
         if(!empty($product)){
             $this->training_advanced = $product->unit_price > 0 ? $product->unit_price : $this->training_advanced;
         }
+
+        // Basic Neurotoxins list price: same source as CI registration / Login info_basic_course.
+        $this->training_basic = $this->register_total;
     }
 
     public function get_schools(){
@@ -1974,8 +1978,8 @@ class CourseController extends AppPluginController {
             // $this->set('level_3', $level_3);
             // $this->set('advanced', $advanced);
 
-            $this->set('number', '9727553038');
-            $this->set('number_label', '(972) 755 3038');
+            $this->set('number', '4692770897');
+            $this->set('number_label', '(469) 277 0897');
 
             $therapy = new TherapyController();
             $iv_status = $therapy->check_application();            
@@ -2912,8 +2916,8 @@ class CourseController extends AppPluginController {
             $this->set('training', $res);
             $this->set('training_cert', $res2);
 
-            $this->set('number', '9727553038');
-            $this->set('number_label', '(972) 755 3038');
+            $this->set('number', '4692770897');
+            $this->set('number_label', '(469) 277 0897');
 
             $therapy = new TherapyController();
             $iv_status = $therapy->check_application();            
@@ -6608,7 +6612,7 @@ class CourseController extends AppPluginController {
                 <li>Main Contact:</li>
                 <ul>
                     <li>Email: MySpa@MySpalive.com</li>                
-                    <li>Phone: 972.755.3038 EXT 0</li>
+                    <li>Phone: 469.277.0897 EXT 0</li>
                 </ul>
             </ul>
 
@@ -6624,8 +6628,8 @@ class CourseController extends AppPluginController {
             <p>
                 For specialized support, we've detailed where you should direct your inquiries:
                 <ul>
-                <li>Tech/App Support: <a href='mailto:Support@myspalive.com'>Support@myspalive.com</a> or 972.755.3038 EXT 5</li>
-                <li>Complaints/Quality Control: <a href='mailto:Qualityassurance@myspalive.com'>Qualityassurance@myspalive.com</a> or 972.755.3038 EXT 3</li>
+                <li>Tech/App Support: <a href='mailto:Support@myspalive.com'>Support@myspalive.com</a> or 469.277.0897 EXT 5</li>
+                <li>Complaints/Quality Control: <a href='mailto:Qualityassurance@myspalive.com'>Qualityassurance@myspalive.com</a> or 469.277.0897 EXT 3</li>
                 <li>Medical/After Training Assistance: <a href='mailto:Deidra@myspalive.com'>Deidra@myspalive.com</a> or 830.730.6771</li>
                 <li>Patient-Related Questions: <a href='mailto:Patientrelations@myspalive.com'>Patientrelations@myspalive.com</a> or 430.205.4192</li>
                 <li>Injector Course Inquiries: <a href='mailto:jenna@myspalive.com'>jenna@myspalive.com</a> or 972.400.0024</li>

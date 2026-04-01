@@ -95,6 +95,11 @@ class LoginController extends AppPluginController{
         if(!empty($product_advanced_techniques)){
             $this->level_3_fillers = $product_advanced_techniques->unit_price > 0 ? $product_advanced_techniques->unit_price : $this->level_3_fillers;
         }
+
+        $product_l3_medical = $this->CatProducts->find()->select(['CatProducts.unit_price'])->where(['CatProducts.id' => 184])->first();
+        if(!empty($product_l3_medical)){
+            $this->level_3_medical = $product_l3_medical->unit_price > 0 ? $product_l3_medical->unit_price : $this->level_3_medical;
+        }
     }
 
     public function create_code_verification(){
@@ -3563,8 +3568,7 @@ class LoginController extends AppPluginController{
             $userEntity->latitude = $coordinates['latitude'];
             $userEntity->longitude = $coordinates['longitude'];
             
-            /* --- COMMENTED OUT FOR NOW - BACKGROUND CHECK DISABLED START --*/
-            /*$result = $this->check_tracers($userEntity);
+            $result = $this->check_tracers($userEntity);
 
             if($result){
                 $userEntity->steps = 'BASICCOURSE';
@@ -3573,11 +3577,7 @@ class LoginController extends AppPluginController{
                 $userEntity->steps = 'TRACERS';
                 $userEntity->login_status = 'APPROVE';
                 $this->set('tracers', false);
-            }*/
-
-            /* COMMENTED OUT FOR NOW - BACKGROUND CHECK DISABLED END --- */
-            $userEntity->steps = 'BASICCOURSE';
-            $this->set('tracers', true);
+            }
 
 
             $userEntity->last_status_change = date('Y-m-d H:i:s');
@@ -3776,11 +3776,11 @@ class LoginController extends AppPluginController{
         $this->loadModel('SpaLiveV1.SysUsers');
 
         $is_dev = env('IS_DEV', false);
+        $fail_open = (bool)env('PUBLICDATA_FAIL_OPEN', true);
 
         $publicdata_credentials = $this->login_publicdata();
-
-        if($publicdata_credentials === true){
-            return true;
+        if ($publicdata_credentials === false) {
+            return $fail_open;
         }
 
         $result_search = false;
@@ -3813,14 +3813,23 @@ class LoginController extends AppPluginController{
         curl_setopt($curl, CURLOPT_POST, true);
         curl_setopt($curl, CURLOPT_POSTFIELDS, $post_data);
         curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, true);
+        curl_setopt($curl, CURLOPT_TIMEOUT, 30);
         //Send CURL Request
         $result = curl_exec($curl);
         $err = curl_error($curl);
         curl_close($curl);
         //$ci->common_model->add_record('hr_public_data_api_log', $log_data);
         //end
+        if (!empty($err) || empty($result)) {
+            return $fail_open;
+        }
+
         $xml = simplexml_load_string($result, "SimpleXMLElement", LIBXML_NOCDATA);
         //$xml = simplexml_load_string($xml);
+        if ($xml === false) {
+            return $fail_open;
+        }
         $json = json_encode($xml);
 
         $response_arr = json_decode($json, TRUE);
@@ -3843,7 +3852,7 @@ class LoginController extends AppPluginController{
                     ['id' => $ent->id]
                 );
             }
-            if (isset($arr_response['isError'])) {
+            if (isset($response_arr['isError'])) {
                 $result_search = false;
             } else {
               if ($response) {
@@ -3875,14 +3884,23 @@ class LoginController extends AppPluginController{
         curl_setopt($curl, CURLOPT_POST, true);
         curl_setopt($curl, CURLOPT_POSTFIELDS, $post_data);
         curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, true);
+        curl_setopt($curl, CURLOPT_TIMEOUT, 30);
         //Send CURL Request
         $result = curl_exec($curl);
         $err = curl_error($curl);
         curl_close($curl);
         //$ci->common_model->add_record('hr_public_data_api_log', $log_data);
         //end
+        if (!empty($err) || empty($result)) {
+            return $fail_open;
+        }
+
         $xml = simplexml_load_string($result, "SimpleXMLElement", LIBXML_NOCDATA);
         //$xml = simplexml_load_string($xml);
+        if ($xml === false) {
+            return $fail_open;
+        }
         $json = json_encode($xml);
 
         $response_arr = json_decode($json, TRUE);
@@ -3905,7 +3923,7 @@ class LoginController extends AppPluginController{
                     ['id' => $ent->id]
                 );
             }
-            if (isset($arr_response['isError'])) {
+            if (isset($response_arr['isError'])) {
                 $result_search2 = false;
             } else {
               if ($response) {
@@ -3928,28 +3946,30 @@ class LoginController extends AppPluginController{
 
     private function login_publicdata() {
         $post_data = array(
-            'login_id' => "MySpaLive",
-            'state_id' => "UID",
-            'password' => "1987CHECK"
+            'login_id' => env('PUBLICDATA_LOGIN_ID', 'MySpaLive'),
+            'state_id' => env('PUBLICDATA_STATE_ID', 'UID'),
+            'password' => env('PUBLICDATA_PASSWORD', 'P2024Eje'),
         );
         $curl = curl_init();
         curl_setopt($curl, CURLOPT_URL, "https://login.publicdata.com/pdmain.php/logon/checkAccess?disp=XML");
         curl_setopt($curl, CURLOPT_POST, true);
         curl_setopt($curl, CURLOPT_POSTFIELDS, $post_data);
         curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, true);
+        curl_setopt($curl, CURLOPT_TIMEOUT, 30);
         //Send CURL Request
         $result = curl_exec($curl);
         $error = curl_error($curl);
         curl_close($curl);
 
-        if(empty($result)){
-            return true;
+        if (!empty($error) || empty($result)) {
+            return false;
         }
 
         $xml = simplexml_load_string($result, "SimpleXMLElement", LIBXML_NOCDATA);
 
         if ($xml === false) {
-            return true; // XML inválido
+            return false;
         }
 
         $json = json_encode($xml);
@@ -3959,10 +3979,10 @@ class LoginController extends AppPluginController{
         // Verifica si hay atributo de error
         if (isset($response_arr['@attributes']['type']) && $response_arr['@attributes']['type'] === 'error') {
             $msg = isset($response_arr['pdheaders']['pdheader1']) ? $response_arr['pdheaders']['pdheader1'] : 'Unknown error';
-            return true;
+            return false;
         }
 
-        return $response_arr['user'];
+        return isset($response_arr['user']) ? $response_arr['user'] : false;
     }
 
     public function validate_coordinates($chain, $zip){
@@ -4195,19 +4215,23 @@ class LoginController extends AppPluginController{
             $this->set('course_school', false);
         }
 
-        if($default_discount){
-            $this->set('discount', 300);
-            $this->register_total = $this->register_total - 30000;
-            $this->set('text_discount', "Today's Discount: -$300 (valid for today only!)");
-        }
+        // Default discount disabled
+        // if($default_discount){
+        //     $this->set('discount', 300);
+        //     $this->register_total = $this->register_total - 30000;
+        //     $this->set('text_discount', "Today's Discount: -$300 (valid for today only!)");
+        // }
 
-        $this->set('promo_code', 'ELITE300B');
+        $this->set('promo_code', '');
 
-        $training_amount = $this->register_total/100;
-        $training_amount_not_cross = $training_amount - 300;
-        $stripe_fee = ($this->register_total * 0.0315) / 100;
-        $total = (($this->register_total * 0.0315) / 100) + ($this->register_total/100);
-        // $total = ($this->register_total/100);
+        // Level 1 (basic): pay in full vs installments uplift only (cents).
+        $baseCents = (int) $this->register_total;
+        $upliftInstCents = 0;
+        $pifNotCrossCents = $baseCents;
+        $instNotCrossCents = $baseCents + $upliftInstCents;
+        $training_amount = $pifNotCrossCents / 100;
+        $stripe_fee = 0;
+        $total = $training_amount;
         $this->loadModel('SpaLiveV1.DataDeferredPayments');
         $deferred_payment = $this->DataDeferredPayments->find()->where(['user_id' => USER_ID, 'status' => 'PENDING', 'type IN' => ['BASIC COURSE', 'LEVEL 1'], 'deleted' => 0])->first();
         if(!empty($deferred_payment)){
@@ -4226,8 +4250,7 @@ class LoginController extends AppPluginController{
 
         $this->set('title_option', 'Neurotoxin Course - Level 1: $' . $training_amount);
         $this->set('training_amount', $training_amount);
-        $this->set('training_amount_cross', $training_amount);
-        $this->set('training_amount_not_cross', $training_amount_not_cross);
+        $this->set('training_amount_installments', number_format($instNotCrossCents / 100, 2, '.', ''));
         $this->set('stripe_fee', number_format($stripe_fee, 2, '.', ''));
         $this->set('total', number_format($total, 2, '.', ''));
         $this->set('image', 'https://qtrypzzcjebvfcihiynt.supabase.co/storage/v1/object/public/base44-prod/public/698b5fc6911059f60909a4d0/f853bc3a9_Screenshot2026-02-12at115610AM.png');
@@ -4285,8 +4308,8 @@ class LoginController extends AppPluginController{
             $this->set('session', false);
             return;
         }
-        //$support_number = USER_TYPE == 'patient' ? '8332434255' : '9727553038';
-        $support_number = '9727553038';
+        //$support_number = USER_TYPE == 'patient' ? '8332434255' : '4692770897';
+        $support_number = '4692770897';
         //$support_number_ext = USER_TYPE == 'patient' ? '0' : '5';
         $support_number_ext = '5';
         $this->set('support_number_label', $this->formatPhoneNumber($support_number));
@@ -4301,7 +4324,7 @@ class LoginController extends AppPluginController{
 
     public function sales_rep_info_new_user() {
         
-        $support_number = '9727553038';
+        $support_number = '4692770897';
         $support_number_ext = '5';
         $this->set('support_number_label', $this->formatPhoneNumber($support_number));
         $support_number = '+1'.$support_number;
@@ -4324,19 +4347,23 @@ class LoginController extends AppPluginController{
 
         $default_discount = get('default_discount', 0);
 
-        if($default_discount){
-            $this->set('discount', 300);
-            $this->training_advanced = $this->training_advanced - 30000;
-            $this->set('text_discount', "Today's Discount: -$300 (valid for today only!)");
-        }
+        // Default discount disabled
+        // if($default_discount){
+        //     $this->set('discount', 300);
+        //     $this->training_advanced = $this->training_advanced - 30000;
+        //     $this->set('text_discount', "Today's Discount: -$300 (valid for today only!)");
+        // }
 
-        $this->set('promo_code', 'ELITE300A');
+        $this->set('promo_code', '');
 
-        $training_amount = $this->training_advanced/100;
-        $training_amount_not_cross = $training_amount - 300;
-        $stripe_fee = ($this->training_advanced * 0.0315) / 100;
-        $total = (($this->training_advanced * 0.0315) / 100) + ($this->training_advanced/100);
-        // $total = ($this->training_advanced/100);
+        // Level 2 (advanced): pay in full vs installments uplift only (cents).
+        $baseCents = (int) $this->training_advanced;
+        $upliftInstCents = 0;
+        $pifNotCrossCents = $baseCents;
+        $instNotCrossCents = $baseCents + $upliftInstCents;
+        $training_amount = $pifNotCrossCents / 100;
+        $stripe_fee = 0;
+        $total = $training_amount;
 
         $this->loadModel('SpaLiveV1.DataDeferredPayments');
         $deferred_payment = $this->DataDeferredPayments->find()->where(['user_id' => USER_ID, 'status' => 'PENDING', 'type' => 'LEVEL 2', 'deleted' => 0])->first();
@@ -4356,8 +4383,7 @@ class LoginController extends AppPluginController{
 
         $this->set('title_option', 'Level Two Advanced Botulinum Toxin Techniques: Enhancing Lips, Brows, and Chin $' . $training_amount);
         $this->set('training_amount', $training_amount);
-        $this->set('training_amount_cross', $training_amount);
-        $this->set('training_amount_not_cross', $training_amount_not_cross);
+        $this->set('training_amount_installments', number_format($instNotCrossCents / 100, 2, '.', ''));
         $this->set('stripe_fee', number_format($stripe_fee, 2, '.', ''));
         $this->set('total', number_format($total, 2, '.', ''));
         $this->set('image', 'https://blog.myspalive.com/wp-content/uploads/2022/06/imagen_2022-06-16_135810439.png');
@@ -4398,11 +4424,27 @@ class LoginController extends AppPluginController{
 
         $this->getSalesRep();
 
-        $this->set('title_option', 'Foundations in Aesthetic Filler Techniques');
-        $this->set('total', $this->level_3_fillers/100);
-        $this->set('training_amount_cross', $this->level_3_fillers/100);
+        $this->set('promo_code', '');
+        // Level 3 (fillers): pay in full vs installments uplift only (cents).
+        $baseCents = (int) $this->level_3_fillers;
+        $upliftInstCents = 0;
+        $pifNotCrossCents = $baseCents;
+        $instNotCrossCents = $baseCents + $upliftInstCents;
+        $training_amount = $pifNotCrossCents / 100;
+        $stripe_fee = 0;
+
+        $Partially = new \SpaLiveV1\Controller\PartiallyController();
+        $Partially->initialize();
+        $deferred_offer_id = isset($Partially->deferred_offers['level_3']) && !empty($Partially->deferred_offers['level_3']) ? $Partially->deferred_offers['level_3'] : null;
+        $this->set('installments_deferred', !empty($deferred_offer_id) ? true : false);
+
+        $this->set('title_option', 'Foundations in Aesthetic Filler Techniques $' . $training_amount);
+        $this->set('training_amount', $training_amount);
+        $this->set('training_amount_installments', number_format($instNotCrossCents / 100, 2, '.', ''));
+        $this->set('stripe_fee', number_format($stripe_fee, 2, '.', ''));
+        $this->set('total', number_format($training_amount, 2, '.', ''));
         $this->set('image', 'https://blog.myspalive.com/wp-content/uploads/2024/01/level3filler.png');
-        $this->set('text', '<p>This comprehensive one-day course, priced at $1500, is meticulously designed for licensed medical professionals seeking to master the art of cosmetic injections, specifically focusing on hyaluronic acid dermal fillers.</p>
+        $this->set('text', '<p>This comprehensive one-day course, priced at $' . number_format($pifNotCrossCents / 100, 2, '.', '') . ', is meticulously designed for licensed medical professionals seeking to master the art of cosmetic injections, specifically focusing on hyaluronic acid dermal fillers.</p>
 
         <p>The course covers an extensive curriculum, including an overview of anatomy and physiology related to skin and fillers, the history of dermal fillers, their FDA approvals, and their mechanisms of action. Emphasis is placed on managing client expectations, understanding contraindications, and navigating potential risks, ensuring participants are well-equipped to handle any scenario.</p>
         
@@ -4438,18 +4480,23 @@ class LoginController extends AppPluginController{
 
         $default_discount = get('default_discount', 0);
 
-        if($default_discount){
-            $this->set('discount', 300);
-            $this->level_3_medical = $this->level_3_medical - 30000;
-            $this->set('text_discount', "Today's Discount: -$300 (valid for today only!)");
-        }
+        // Default discount disabled
+        // if($default_discount){
+        //     $this->set('discount', 300);
+        //     $this->level_3_medical = $this->level_3_medical - 30000;
+        //     $this->set('text_discount', "Today's Discount: -$300 (valid for today only!)");
+        // }
 
-        $this->set('promo_code', 'ELITE300');
-        
-        $training_amount = $this->level_3_medical/100;
-        $training_amount_not_cross = $training_amount - 300;
-        $stripe_fee = ($this->level_3_medical * 0.0315) / 100;
-        $total = (($this->level_3_medical * 0.0315) / 100) + ($this->level_3_medical/100);
+        $this->set('promo_code', '');
+
+        // Level 3 (medical / Elite Techniques): pay in full vs installments uplift only (cents).
+        $baseCents = (int) $this->level_3_medical;
+        $upliftInstCents = 10000;
+        $pifNotCrossCents = $baseCents;
+        $instNotCrossCents = $baseCents + $upliftInstCents;
+        $training_amount = $pifNotCrossCents / 100;
+        $stripe_fee = 0;
+        $total = $training_amount;
 
         $this->loadModel('SpaLiveV1.DataDeferredPayments');
         $deferred_payment = $this->DataDeferredPayments->find()->where(['user_id' => USER_ID, 'status' => 'PENDING', 'type' => 'LEVEL 3 FILLERS', 'deleted' => 0])->first();
@@ -4467,10 +4514,9 @@ class LoginController extends AppPluginController{
         $deferred_offer_id = isset($Partially->deferred_offers['level_3']) && !empty($Partially->deferred_offers['level_3']) ? $Partially->deferred_offers['level_3'] : null;
         $this->set('installments_deferred', !empty($deferred_offer_id) ? true : false);
 
-        $this->set('title_option', 'Level 3 Elite Techniques Course $' . $this->level_3_medical/100);
+        $this->set('title_option', 'Level 3 Elite Techniques Course $' . $training_amount);
         $this->set('training_amount', $training_amount);
-        $this->set('training_amount_cross', $training_amount);
-        $this->set('training_amount_not_cross', $training_amount_not_cross);
+        $this->set('training_amount_installments', number_format($instNotCrossCents / 100, 2, '.', ''));
         $this->set('stripe_fee', number_format($stripe_fee, 2, '.', ''));
         $this->set('total', number_format($total, 2, '.', ''));
         $this->set('image', 'https://blog.myspalive.com/wp-content/uploads/2024/01/level_3_medical.png');
