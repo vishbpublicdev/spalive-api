@@ -36886,7 +36886,7 @@ class MainController extends AppPluginController {
                 }
             } elseif ($assigned_training_level !== 'LEVEL 2') {
                 // For LEVEL 3 and other non-LEVEL 2 courses
-               /* $tempSteps = (string)$userEntity->steps;
+               $tempSteps = (string)$userEntity->steps;
                 $userEntity->steps = $tempSteps !== 'HOME' ? 'MATERIALS' : $tempSteps;
                 $this->SysUsers->save($userEntity);
 
@@ -36905,7 +36905,7 @@ class MainController extends AppPluginController {
                     if (!$entity->hasErrors()) {
                         $this->DataInjectorRegistered->save($entity);
                     }
-                }*/
+                }
             } else {
                 // LEVEL 2: join_training doesn't update steps (commented out there), keep as-is.
                /*  $this->SysUsers->save($userEntity); */
