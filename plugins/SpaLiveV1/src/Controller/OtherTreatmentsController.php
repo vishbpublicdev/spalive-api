@@ -37,7 +37,7 @@ class OtherTreatmentsController extends AppPluginController{
     private $shipping_cost_mat = 1000;
     private $shipping_cost_misc = 1000;
     private $training_advanced = 89500;
-    private $emergencyPhone = "(972) 755 3038, (847) 477 5791";//"9035301512";
+    private $emergencyPhone = "(469) 277 0897, (847) 477 5791";//"9035301512";
     private $emergencyPhone2 = "(847) 477 5791,(812) 322 8388";// "8474775791";
     private $total_subscriptionmsl = 3995;
     private $total_subscriptionmd = 17900;
@@ -379,6 +379,8 @@ class OtherTreatmentsController extends AppPluginController{
             ->select([
                 'id',
                 'price',
+                'price_not_cross_full',
+                'price_not_cross_installments',
                 'image',
                 'discount_id',
                 'description',
@@ -422,16 +424,25 @@ class OtherTreatmentsController extends AppPluginController{
 
 
         $api_url = env('URL_API', 'https://api.myspalive.com/');
-        $training_amount = intval($training->price - $discount);
-        $training_amount_cross = intval($training->price);
-        $stripe_fee = intval($training_amount * 0.0315);
-        $total = intval($training_amount + $stripe_fee);
+        $training_amount_cents = intval($training->price - $discount);
+        $stripe_fee = 0;
+        $total = $training_amount_cents;
+
+        $pay_in_full_cents = $training_amount_cents;
+        if (!empty($training->price_not_cross_full) && (int)$training->price_not_cross_full > 0) {
+            $pay_in_full_cents = (int)$training->price_not_cross_full;
+        }
 
         $this->set('id', $training->id);
         $this->set('course_id', $training->id);
         $this->set('title', $training->title);
         $this->set('level', $training->name_key);
-        $this->set('training_amount', number_format(($training_amount / 100), 2, '.', ''));
+        $this->set('training_amount', number_format(($pay_in_full_cents / 100), 2, '.', ''));
+        $installments_cents = $pay_in_full_cents;
+        if (!empty($training->price_not_cross_installments) && (int)$training->price_not_cross_installments > 0) {
+            $installments_cents = (int)$training->price_not_cross_installments;
+        }
+        $this->set('training_amount_installments', number_format(($installments_cents / 100), 2, '.', ''));
         $this->set('description', $training->description);
         if (!empty($training->image)) {
             if (strpos($training->image, 'https://') === 0) {
@@ -444,11 +455,6 @@ class OtherTreatmentsController extends AppPluginController{
         }
         $this->set('stripe_fee', number_format(($stripe_fee / 100), 2, '.', ''));
         $this->set('total', number_format(($total / 100), 2, '.', ''));
-
-        
-
-        
-        $this->set('training_amount_cross', number_format(($training_amount_cross / 100), 2, '.', ''));
 
         $this->set('installments', !empty($training->offer_id) ? true : false);
         $this->set('installments_deferred', !empty($training->deferred_offer_id) ? true : false);

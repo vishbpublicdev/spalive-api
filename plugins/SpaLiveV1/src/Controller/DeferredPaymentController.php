@@ -817,9 +817,9 @@ class DeferredPaymentController extends AppPluginController {
                     </p>
 
                     <p style="text-align: center;">
-                    <a href="tel:+19727553038" 
+                    <a href="tel:+14692770897" 
                         style="color: white; text-decoration: none;">
-                        (972) 7553038
+                        (469) 2770897
                     </a>
                     </p>
                 ';
@@ -888,9 +888,9 @@ class DeferredPaymentController extends AppPluginController {
                     </p>
 
                     <p style="text-align: center;">
-                    <a href="tel:+19727553038" 
+                    <a href="tel:+14692770897" 
                         style="color: white; text-decoration: none;">
-                        (972) 7553038
+                        (469) 2770897
                     </a>
                     </p>
 

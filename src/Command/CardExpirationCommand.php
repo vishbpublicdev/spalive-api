@@ -289,7 +289,7 @@ class CardExpirationCommand extends Command{
                                 <p>Dear '.$name.',</p>
                                 <p>We noticed that the payment method on your MySpaLive account is nearing its expiration date. To avoid any interruptions in accessing our premier services, please update your payment information at your earliest convenience. <a href="'.$path.'">Click here to update your payment information.</a> </p>
                                 <p><b>Need Assistance?</b><br>
-                                If you encounter any issues or have questions, please don\'t hesitate to contact our support team at <a href="mailto:support@myspalive.com">support@myspalive.com</a> or 972-755-3038. We\'re here to assist you!</p>
+                                If you encounter any issues or have questions, please don\'t hesitate to contact our support team at <a href="mailto:support@myspalive.com">support@myspalive.com</a> or 469-277-0897. We\'re here to assist you!</p>
                                 <p>Thank you for your attention to this matter, and we look forward to continuing to serve you with our exceptional aesthetic services.</p>
                                 <p>Best,<br>
                                 The MySpaLive Team</p> 

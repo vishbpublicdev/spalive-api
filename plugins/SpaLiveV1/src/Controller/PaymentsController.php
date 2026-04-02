@@ -41,7 +41,7 @@ class PaymentsController extends AppPluginController{
 
     private $total = 3900;
     private $paymente_gfe = 2500;
-    private $register_total = 79500;
+    private $register_total = 89500;
     private $register_refund = 3500;
     private $shipping_cost = 1000;
     private $shipping_cost_both = 4000;
@@ -54,7 +54,7 @@ class PaymentsController extends AppPluginController{
     private $ship_cost_neuro = 4000;
     private $ship_cost_fill = 4000;
     private $ship_cost_vial = 4000;
-    private $training_basic = 79500;
+    private $training_basic = 89500;
     private $training_advanced = 89500;
     private $level_3_fillers = 150000;//level 3 fillers
     private $level_3_medical = 99500;//level 3 medical
@@ -77,12 +77,41 @@ class PaymentsController extends AppPluginController{
 
     protected $mailgunKey = null;
 
+    /**
+     * When any line in data_purchases_detail has this product_id, purchase promo codes
+     * and Elite Club line discount are not applied. Override with env PURCHASE_PROMO_EXCLUDED_PRODUCT_ID.
+     */
+    protected $purchasePromoExcludedProductId = 24;
+
     protected function getMailgunKey(): ?string
     {
         if ($this->mailgunKey === null) {
             $this->mailgunKey = env('MAILGUN_API_KEY');
         }
         return $this->mailgunKey;
+    }
+
+    /**
+     * @param array|\ArrayAccess[] $purchaseDetails Rows from DataPurchasesDetail (product_id on each row).
+     */
+    private function purchaseContainsPromoExcludedProduct($purchaseDetails): bool
+    {
+        if (empty($purchaseDetails)) {
+            return false;
+        }
+        $excludedId = $this->purchasePromoExcludedProductId;
+        foreach ($purchaseDetails as $row) {
+            $pid = null;
+            if (is_array($row)) {
+                $pid = $row['product_id'] ?? null;
+            } elseif (is_object($row) && isset($row->product_id)) {
+                $pid = $row->product_id;
+            }
+            if ((int) $pid === $excludedId) {
+                return true;
+            }
+        }
+        return false;
     }
 
 	public function initialize() : void{
@@ -92,6 +121,7 @@ class PaymentsController extends AppPluginController{
         $this->URL_WEB = env('URL_WEB', 'https://app.myspalive.com/');
         $this->URL_ASSETS = env('URL_ASSETS', 'https://api.myspalive.com/assets/');
         $this->URL_PANEL = env('URL_PANEL', 'https://panel.myspalive.com/');
+        $this->purchasePromoExcludedProductId = (int) env('PURCHASE_PROMO_EXCLUDED_PRODUCT_ID', (string) $this->purchasePromoExcludedProductId);
         $this->loadModel('SpaLiveV1.AppToken');
         $this->loadModel('SpaLiveV1.CatStates');
         $this->loadModel('SpaLiveV1.CatProducts');
@@ -144,6 +174,16 @@ class PaymentsController extends AppPluginController{
         $product = $this->CatProducts->find()->select(['CatProducts.unit_price'])->where(['CatProducts.id' => 44])->first();
         if(!empty($product)){
             $this->training_advanced = $product->unit_price > 0 ? $product->unit_price : $this->training_advanced;
+        }
+
+        $product_fillers = $this->CatProducts->find()->select(['CatProducts.unit_price'])->where(['CatProducts.id' => 178])->first();
+        if(!empty($product_fillers)){
+            $this->level_3_fillers = $product_fillers->unit_price > 0 ? $product_fillers->unit_price : $this->level_3_fillers;
+        }
+
+        $product_l3_medical = $this->CatProducts->find()->select(['CatProducts.unit_price'])->where(['CatProducts.id' => 184])->first();
+        if(!empty($product_l3_medical)){
+            $this->level_3_medical = $product_l3_medical->unit_price > 0 ? $product_l3_medical->unit_price : $this->level_3_medical;
         }
     }
 
@@ -452,12 +492,18 @@ class PaymentsController extends AppPluginController{
             }
         }
 
+        $isSingleCoursePurchase = (count($_ent_purchases) === 1
+            && in_array($type_purchase, ['TRAINING', 'LEVEL3', 'FILLERS', 'TOXTUNEUP'], true));
+
         $code = strtoupper(trim(get('promo_code', '')));
         $this->loadModel('SpaLiveV1.DataCodeEc');
         $ent_promo = $this->DataCodeEc->find()->last();
 
         $total_amount = 0;
-        if(!empty($ent_promo)){
+        $skipPurchasePromo = $this->purchaseContainsPromoExcludedProduct($_ent_purchases);
+        if ($skipPurchasePromo) {
+            $total_amount = $this->validateCode('', ($ent_purchase->amount), $type_purchase) + $ent_purchase->shipping_cost;
+        } elseif(!empty($ent_promo)){
             if($ent_promo->code == $code){
                 $this->loadModel('SpaLiveV1.DataEliteClub');
                 $elite = $this->DataEliteClub->find()->where(['user_id' => USER_ID, 'active' => 1, 'deleted' => 0])->first();
@@ -473,25 +519,45 @@ class PaymentsController extends AppPluginController{
                     }
 
                     if($discount_amount == 0){
-                        $stripe_fee = intval(($total_amount + $ent_purchase->shipping_cost) * 0.0315);
-                        $this->set('code_valid', true);
-                        $this->set('discount_type', '');
-                        $this->set('discount', 0);
-                        $this->set('discount_amount', $discount_amount);
-                        $this->set('stripe_fee', $stripe_fee);
-                        $this->set('discount_text', '');
-
-                        $total_amount = $total_amount + $stripe_fee + $ent_purchase->shipping_cost;
+                        if ($isSingleCoursePurchase) {
+                            $stripe_fee = 0;
+                            $this->set('code_valid', true);
+                            $this->set('discount_type', '');
+                            $this->set('discount', 0);
+                            $this->set('discount_amount', $discount_amount);
+                            $this->set('stripe_fee', 0);
+                            $this->set('discount_text', '');
+                            $total_amount = $total_amount + $ent_purchase->shipping_cost;
+                        } else {
+                            $stripe_fee = intval(($total_amount + $ent_purchase->shipping_cost) * 0.0315);
+                            $this->set('code_valid', true);
+                            $this->set('discount_type', '');
+                            $this->set('discount', 0);
+                            $this->set('discount_amount', $discount_amount);
+                            $this->set('stripe_fee', $stripe_fee);
+                            $this->set('discount_text', '');
+                            $total_amount = $total_amount + $stripe_fee + $ent_purchase->shipping_cost;
+                        }
                     }else{
-                        $stripe_fee = intval(($total_amount + $ent_purchase->shipping_cost) * 0.0315);
-                        $this->set('code_valid', true);
-                        $this->set('discount_type', $ent_promo->type);
-                        $this->set('discount', $ent_promo->discount);
-                        $this->set('discount_amount', $discount_amount);
-                        $this->set('stripe_fee', $stripe_fee);
-                        $this->set('discount_text', '-' . $ent_promo->discount . '% Elite Club discount has been applied.');
-
-                        $total_amount = $total_amount + $stripe_fee + $ent_purchase->shipping_cost;
+                        if ($isSingleCoursePurchase) {
+                            $stripe_fee = 0;
+                            $this->set('code_valid', true);
+                            $this->set('discount_type', $ent_promo->type);
+                            $this->set('discount', $ent_promo->discount);
+                            $this->set('discount_amount', $discount_amount);
+                            $this->set('stripe_fee', 0);
+                            $this->set('discount_text', '-' . $ent_promo->discount . '% Elite Club discount has been applied.');
+                            $total_amount = $total_amount + $ent_purchase->shipping_cost;
+                        } else {
+                            $stripe_fee = intval(($total_amount + $ent_purchase->shipping_cost) * 0.0315);
+                            $this->set('code_valid', true);
+                            $this->set('discount_type', $ent_promo->type);
+                            $this->set('discount', $ent_promo->discount);
+                            $this->set('discount_amount', $discount_amount);
+                            $this->set('stripe_fee', $stripe_fee);
+                            $this->set('discount_text', '-' . $ent_promo->discount . '% Elite Club discount has been applied.');
+                            $total_amount = $total_amount + $stripe_fee + $ent_purchase->shipping_cost;
+                        }
                     }
 
                     
@@ -777,20 +843,23 @@ class PaymentsController extends AppPluginController{
 
         $this->loadModel('SpaLiveV1.DataPromoCodes');
 
+        // Course checkouts: do not pass Stripe processing fee to the customer (display or charge).
+        $courseCategoriesNoStripePass = ['REGISTER', 'TRAINING', 'LEVEL3', 'OTCOURSE'];
+
         $ent_codes = $this->DataPromoCodes->find()
         ->where(['DataPromoCodes.deleted' => 0,'DataPromoCodes.active' => 1,'DataPromoCodes.code' => strtoupper($code)])->first();
         if (!empty($ent_codes)) {
 
             if ($ent_codes->category != 'ALL' && $ent_codes->category != $category) {
                 $this->set('code_valid', false);
-                $this->set('stripe_fee', intval($subtotal * 0.0315));
+                $this->set('stripe_fee', in_array($category, $courseCategoriesNoStripePass, true) ? 0 : intval($subtotal * 0.0315));
                 return $subtotal;
             }
 
             // OTHER COURSES VALIDATION START***
             if($category == 'OTCOURSE' && $ent_codes->course_type_id > 0 && $ent_codes->course_type_id != $course_id){
                 $this->set('code_valid', false);
-                $this->set('stripe_fee', intval($subtotal * 0.0315));
+                $this->set('stripe_fee', 0);
                 return $subtotal;
             }
             
@@ -813,8 +882,12 @@ class PaymentsController extends AppPluginController{
                 }
                 else if ($total < 100) $total = 100;
 
+                if (in_array($category, $courseCategoriesNoStripePass, true)) {
+                    $this->set('stripe_fee', 0);
+                    return round($total);
+                }
                 $this->set('stripe_fee', intval($total * 0.0315));
-                if($category == 'TRAINING' || $category == 'REGISTER' || $category == 'PURCHASE' || $category == 'LEVEL3' || $category == 'TOXTUNEUP' || $category == 'FILLERS' || $category == 'OTCOURSE'){
+                if($category == 'PURCHASE' || $category == 'TOXTUNEUP' || $category == 'FILLERS'){
                     $total = ($total * 0.0315) + $total;
                     $this->set('discount_text', ' -' . $ent_codes->discount . '% added');
                 }
@@ -832,8 +905,12 @@ class PaymentsController extends AppPluginController{
                 }
                 else if ($total < 100) $total = 100;
 
+                if (in_array($category, $courseCategoriesNoStripePass, true)) {
+                    $this->set('stripe_fee', 0);
+                    return round($total);
+                }
                 $this->set('stripe_fee', intval($total * 0.0315));
-                if($category == 'TRAINING' || $category == 'REGISTER' || $category == 'PURCHASE' || $category == 'LEVEL3' || $category == 'TOXTUNEUP' || $category == 'FILLERS' || $category == 'OTCOURSE'){
+                if($category == 'PURCHASE' || $category == 'TOXTUNEUP' || $category == 'FILLERS'){
                     $total = ($total * 0.0315) + $total;
                     $this->set('discount_text', ' -$' . ($ent_codes->discount / 100) . ' added');
                 }
@@ -898,6 +975,10 @@ class PaymentsController extends AppPluginController{
         }
         $this->set('code_valid', false);
 
+        if (in_array($category, $courseCategoriesNoStripePass, true)) {
+            $this->set('stripe_fee', 0);
+            return round($subtotal);
+        }
         $this->set('stripe_fee', intval($subtotal * 0.0315));
         if($category == 'TRAINING' || $category == 'REGISTER' || $category == 'PURCHASE'){
             $subtotal = ($subtotal * 0.0315) + $subtotal;
@@ -1103,10 +1184,11 @@ class PaymentsController extends AppPluginController{
 
             $total_amount = $this->validateCode(get('promo_code',''),$this->register_total,'REGISTER');
 
-            if($default_discount){
-                $total_amount = $this->register_total - 30000;
-                $total_amount = round(($total_amount * 0.0315) + $total_amount);
-            }
+            // Default discount disabled
+            // if($default_discount){
+            //     $total_amount = $this->register_total - 30000;
+            //     $total_amount = round(($total_amount * 0.0315) + $total_amount);
+            // }
 
             $subtotal = $this->register_total;
             $payment_uid = USER_UID;
@@ -1118,20 +1200,22 @@ class PaymentsController extends AppPluginController{
             }
             $total_amount = $this->validateCode(get('promo_code',''),$this->training_advanced,'TRAINING');
 
-            if($default_discount){
-                $total_amount = $this->training_advanced - 30000;
-                $total_amount = round(($total_amount * 0.0315) + $total_amount);
-            }
+            // Default discount disabled
+            // if($default_discount){
+            //     $total_amount = $this->training_advanced - 30000;
+            //     $total_amount = round(($total_amount * 0.0315) + $total_amount);
+            // }
 
             $subtotal = $this->training_advanced;
             $payment_uid = Text::uuid();
         } else if($course == 'ADVANCED TECHNIQUES MEDICAL'){
             $total_amount = $this->validateCode(get('promo_code',''),$this->level_3_medical,'TRAINING');
 
-            if($default_discount){
-                $total_amount = $this->level_3_medical - 30000;
-                $total_amount = round(($total_amount * 0.0315) + $total_amount);
-            }
+            // Default discount disabled
+            // if($default_discount){
+            //     $total_amount = $this->level_3_medical - 30000;
+            //     $total_amount = round(($total_amount * 0.0315) + $total_amount);
+            // }
 
             $subtotal = $this->level_3_medical;
             $payment_uid = Text::uuid();
@@ -3512,7 +3596,11 @@ class PaymentsController extends AppPluginController{
 
             if($label!=""&&$course_amount>0){
 
-                $total_amount = $this->validateCode(get('promo_code',''),$course_amount,$discount_category);
+                $promoForCourse = get('promo_code', '');
+                if ($this->purchaseContainsPromoExcludedProduct($_ent_purchases)) {
+                    $promoForCourse = '';
+                }
+                $total_amount = $this->validateCode($promoForCourse, $course_amount, $discount_category);
                 try {
                     $stripe_result = \Stripe\PaymentIntent::create([
                         'amount' => $total_amount,
@@ -3770,7 +3858,10 @@ class PaymentsController extends AppPluginController{
         $ent_promo = $this->DataCodeEc->find()->last();
 
         $total_amount = 0;
-        if(!empty($ent_promo)){
+        $skipPurchasePromo = $this->purchaseContainsPromoExcludedProduct($_ent_purchases);
+        if ($skipPurchasePromo) {
+            $total_amount = $this->validateCode('', ($ent_purchase->amount), $type_purchase) + $ent_purchase->shipping_cost;
+        } elseif(!empty($ent_promo)){
             if($ent_promo->code == $code){
                 $this->loadModel('SpaLiveV1.DataEliteClub');
                 $elite = $this->DataEliteClub->find()->where(['user_id' => USER_ID, 'active' => 1, 'deleted' => 0])->first();
@@ -5698,7 +5789,7 @@ class PaymentsController extends AppPluginController{
                 $this->loadModel('SpaLiveV1.DataWN');
                 $ent_w9 = $this->DataWN->find()->where (['DataWN.user_id' => $id])->first();
                 
-                $payers_name_and_address = 'MySpaLive<br>130 N Preston road. #329 Prosper, TX, 75078<br>+1 (972) 755 3038';
+                $payers_name_and_address = 'MySpaLive<br>130 N Preston road. #329 Prosper, TX, 75078<br>+1 (469) 277 0897';
                 $payer_tin = '85-3546576';
                 $receipt_tin = ($ent_w9) ? !empty($ent_w9->ssn) ? $ent_w9->ssn : $ent_w9->ein : $ent_user->ein;
                 $recipient_name = !empty($ent_w9->name) ? $ent_w9->name : $ent_user->name . ' ' . $ent_user->lname;
