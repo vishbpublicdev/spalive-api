@@ -36538,6 +36538,10 @@ class MainController extends AppPluginController {
                 case 'FILLER_COURSE_LEVEL_1':
                     $type_string = 'FILLER_COURSE_LEVEL_1';
                     break;
+                case 'COURSE_FILLERS_LEVEL_2':
+                case 'FILLER_COURSE_LEVEL_2':
+                    $type_string = 'FILLER_COURSE_LEVEL_2';
+                    break;
                 default:
                     $type_string = 'UNKNOWN';
                     break;
@@ -37220,6 +37224,218 @@ class MainController extends AppPluginController {
         ';
 
         return $emailBodyHtml;
+    }
+
+    /**
+     * Stores external course purchases (Port2Pay) for existing users.
+     *
+     * Auth:
+     * - api_key: must match Configure::read('App.external_api_key')
+     *
+     * Params:
+     * - email: User email (required - user must exist)
+     * - course_key: Course key from Port2Pay (required)
+     *               Examples: COURSE_BASIC, COURSE_ADVANCED, COURSE_LEVEL3, COURSE_OTHER
+     * - payment_intent: External payment intent/reference (required)
+     * - charge_id: External charge/transaction ID (required)
+     * - subtotal: Subtotal before discounts (required)
+     * - total: Total charged amount (required)
+     * - promo_code: Promo code used (optional)
+     * - paid_at: Payment datetime (optional, format Y-m-d H:i:s)
+     * - state: State ID (optional)
+     * - service_uid: External service UID/reference (optional)
+     * - installments: Number of payments/installments (optional)
+     * - card_brand: Card brand used (optional)
+     * - card_last4: Card last 4 digits (optional)
+     * - receipt_url: Receipt URL (optional)
+     */
+    public function add_external_course_payment_confirmation() {
+        $this->loadModel('SpaLiveV1.SysUsers');
+        $this->loadModel('SpaLiveV1.DataPayment');
+
+        $api_key = get('api_key', '');
+        $expected_api_key = Configure::read('App.external_api_key', '');
+        if (empty($expected_api_key) || $api_key !== $expected_api_key) {
+            $this->message('Invalid API key.');
+            $this->set('success', false);
+            return false;
+        }
+
+        $email = strtolower(trim(get('email', '')));
+        $course_key = strtoupper(trim(get('course_key', get('type_course', ''))));
+        $payment_intent = trim(get('payment_intent', ''));
+        $charge_id = trim(get('charge_id', ''));
+        $subtotal = intval(get('subtotal', 0));
+        $total = intval(get('total', 0));
+        $promo_code = strtoupper(trim(get('promo_code', '')));
+        $state_id = intval(get('state', 0));
+        $service_uid = trim(get('service_uid', ''));
+        $installments = intval(get('installments', 0));
+        $card_brand = trim(get('card_brand', ''));
+        $card_last4 = trim(get('card_last4', ''));
+        $receipt_url = trim(get('receipt_url', ''));
+        $paid_at = trim(get('paid_at', ''));
+
+        // Optional compatibility aliases for external integrations.
+        if ($total <= 0) {
+            $total = intval(get('payment_amount', 0));
+        }
+        if ($subtotal <= 0) {
+            $subtotal = intval(get('amount_subtotal', $total));
+        }
+
+        if (empty($email)) {
+            $this->message('Email is required.');
+            $this->set('success', false);
+            return false;
+        }
+        if (empty($course_key)) {
+            $this->message('course_key is required.');
+            $this->set('success', false);
+            return false;
+        }
+        if (empty($payment_intent) || empty($charge_id)) {
+            $this->message('Payment intent and charge ID are required.');
+            $this->set('success', false);
+            return false;
+        }
+        if ($subtotal <= 0 || $total <= 0) {
+            $this->message('Subtotal and total must be greater than 0.');
+            $this->set('success', false);
+            return false;
+        }
+
+        $course_type_map = [
+            'COURSE_BASIC' => 'BASIC COURSE',
+            'BASIC' => 'BASIC COURSE',
+            'BASIC COURSE' => 'BASIC COURSE',
+            'COURSE_ADVANCED' => 'ADVANCED COURSE',
+            'ADVANCED' => 'ADVANCED COURSE',
+            'ADVANCED COURSE' => 'ADVANCED COURSE',
+            'COURSE_LEVEL3' => 'ADVANCED TECHNIQUES MEDICAL',
+            'LEVEL3' => 'ADVANCED TECHNIQUES MEDICAL',
+            'LEVEL 3' => 'ADVANCED TECHNIQUES MEDICAL',
+            'ADVANCED TECHNIQUES MEDICAL' => 'ADVANCED TECHNIQUES MEDICAL',
+            'COURSE_FILLERS_LEVEL_1' => 'FILLER_COURSE_LEVEL_1',
+            'FILLER_COURSE_LEVEL_1' => 'FILLER_COURSE_LEVEL_1',
+            'COURSE_FILLERS_LEVEL_2' => 'FILLER_COURSE_LEVEL_2',
+            'FILLER_COURSE_LEVEL_2' => 'FILLER_COURSE_LEVEL_2',
+            'COURSE_OTHER' => 'UNKNOWN',
+            'OTHER' => 'UNKNOWN',
+        ];
+
+        if (!isset($course_type_map[$course_key])) {
+            $this->message('Invalid course_key. Allowed keys: COURSE_BASIC, COURSE_ADVANCED, COURSE_LEVEL3, COURSE_FILLERS_LEVEL_1, COURSE_OTHER.');
+            $this->set('success', false);
+            return false;
+        }
+
+        $type_string = $course_type_map[$course_key];
+
+        $existUser = $this->SysUsers->find()
+            ->where(['SysUsers.email LIKE' => $email, 'SysUsers.deleted' => 0])
+            ->first();
+
+        if (empty($existUser)) {
+            $this->message('User not found for provided email.');
+            $this->set('success', false);
+            return false;
+        }
+
+        $created_at = date('Y-m-d H:i:s');
+        if (!empty($paid_at)) {
+            $paid_at_unix = strtotime($paid_at);
+            if ($paid_at_unix !== false) {
+                $created_at = date('Y-m-d H:i:s', $paid_at_unix);
+            }
+        }
+
+        // Prevent duplicate records when Port2Pay retries notifications.
+        $existing_payment = $this->DataPayment->find()
+            ->where([
+                'DataPayment.id_from' => $existUser->id,
+                'DataPayment.intent' => $payment_intent,
+                'DataPayment.payment' => $charge_id,
+                'DataPayment.type' => $type_string,
+            ])
+            ->first();
+
+        if (!empty($existing_payment)) {
+            return [
+                'user_id' => $existUser->id,
+                'user_uid' => $existUser->uid,
+                'paymentEntity' => $existing_payment,
+            ];
+        }
+
+        $comments_payload = [
+            'source' => 'port2pay',
+            'course_key' => $course_key,
+            'installments' => $installments,
+            'card_brand' => $card_brand,
+            'card_last4' => $card_last4,
+        ];
+
+        $array_payment = [
+            'id_from' => $existUser->id,
+            'id_to' => 0,
+            'uid' => Text::uuid(),
+            'service_uid' => $service_uid,
+            'type' => $type_string,
+            'intent' => $payment_intent,
+            'payment' => $charge_id,
+            'receipt' => $receipt_url,
+            'discount_credits' => 0,
+            'promo_discount' => 0,
+            'promo_code' => $promo_code,
+            'subtotal' => $subtotal,
+            'total' => $total,
+            'prod' => 1,
+            'is_visible' => 1,
+            'comission_payed' => 1,
+            'comission_generated' => 0,
+            'prepaid' => 0,
+            'refund_id' => 0,
+            'transfer' => '',
+            'created' => $created_at,
+            'createdby' => $existUser->id,
+            'state' => $state_id > 0 ? $state_id : ($existUser->state ?? 43),
+            'payment_platform' => 'port2pay',
+            'comments' => json_encode($comments_payload),
+        ];
+
+        $paymentEntity = $this->DataPayment->newEntity($array_payment);
+        if ($paymentEntity->hasErrors()) {
+            $this->message('Payment validation failed: ' . json_encode($paymentEntity->getErrors()));
+            $this->set('success', false);
+            return false;
+        }
+
+        if (!$this->DataPayment->save($paymentEntity)) {
+            $this->message('Failed to save external course payment.');
+            $this->set('success', false);
+            return false;
+        }
+
+        return [
+            'user_id' => $existUser->id,
+            'user_uid' => $existUser->uid,
+            'paymentEntity' => $paymentEntity,
+        ];
+    }
+
+    public function external_course_payment_confirmation() {
+        $result = $this->add_external_course_payment_confirmation();
+        if ($result === false) {
+            return;
+        }
+
+        $this->set('success', true);
+        $this->set('user_id', $result['user_id']);
+        $this->set('user_uid', $result['user_uid']);
+        $this->set('payment_id', $result['paymentEntity']->id);
+        $this->set('message', 'External course payment processed successfully.');
+        $this->success();
     }
 
 }
