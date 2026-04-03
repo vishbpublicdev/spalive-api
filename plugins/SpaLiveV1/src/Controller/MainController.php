@@ -36967,8 +36967,7 @@ class MainController extends AppPluginController {
                     }
                 }
             } else {
-                // LEVEL 2: join_training doesn't update steps (commented out there), keep as-is.
-               /*  $this->SysUsers->save($userEntity); */
+               
             }
         }
 
