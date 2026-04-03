@@ -1211,6 +1211,7 @@ CREATE TABLE `data_payment` (
   `createdby` int(11) NOT NULL,
   `refund_id` int(11) NOT NULL,
   `transfer` varchar(255) NOT NULL,
+  `external_confirmation` tinyint(1) NOT NULL DEFAULT 0 COMMENT '1 = created via add_external_payment_confirmation API',
   PRIMARY KEY (`id`) USING BTREE,
   KEY `from` (`id_from`),
   KEY `to` (`id_to`),
