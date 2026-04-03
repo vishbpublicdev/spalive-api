@@ -36799,6 +36799,7 @@ class MainController extends AppPluginController {
                 'state' => $state_id,
                 'payment_platform' => 'port2pay',
                 'comments' => json_encode($extra_data),
+                'platform' => 1,
             );
 
             $paymentEntity = $this->DataPayment->newEntity($array_payment);
