@@ -17243,8 +17243,27 @@ class MainController extends AppPluginController {
                 ->first();
 
                 if (!empty($other_treatment)) {
-                    $call_type = $other_treatment['CT']['id'];
-                    $ot_exam_id = $other_treatment['CT']['qualiphy_exam_id'];
+                    $ot_exam_id = (int)$other_treatment['CT']['qualiphy_exam_id'];
+                    $call_type = (string)$other_treatment['CT']['id'];
+                    // One Qualiphy exam can map to multiple cat_treatments rows; store all ids so one GFE covers each.
+                    if ($ot_exam_id > 0) {
+                        $this->loadModel('SpaLiveV1.CatTreatments');
+                        $sameExamRows = $this->CatTreatments->find()
+                            ->select(['CatTreatments.id'])
+                            ->where([
+                                'CatTreatments.deleted' => 0,
+                                'CatTreatments.qualiphy_exam_id' => $ot_exam_id,
+                            ])
+                            ->order(['CatTreatments.id' => 'ASC'])
+                            ->all();
+                        $treatmentIds = [];
+                        foreach ($sameExamRows as $ctRow) {
+                            $treatmentIds[] = (int)$ctRow->id;
+                        }
+                        if (!empty($treatmentIds)) {
+                            $call_type = implode(',', $treatmentIds);
+                        }
+                    }
                 } else {
                     $this->message('Treatment not found');
                     return;
@@ -36466,7 +36485,8 @@ class MainController extends AppPluginController {
         $payment_amount = intval(get('total', get('amount_total', 0)));
         $payment_intent = trim(get('payment_intent', ''));
         $charge_id = trim(get('charge_id', ''));
-        $installments = intval(get('installments', get('payment_count', 0)));
+        $receipt_url = trim(get('receipt_url', ''));
+        $installments = intval(get('installment', get('installments', get('payment_count', 0))));
         
         // Get course type - accept both 'type_course' (normal flow) or 'course_type' (direct value)
         $type_course = strtoupper(trim(get('type_course', get('course_key', get('course_type', '')))));
@@ -36742,7 +36762,7 @@ class MainController extends AppPluginController {
             $extra_data = [
                 'source' => 'port2pay',
                 'course_key' => $type_course,
-                'installments' => $installments,
+                'installment' => $installments,
             ];
             $array_payment = array(
                 'id_from' => $user_id,
@@ -36752,7 +36772,7 @@ class MainController extends AppPluginController {
                 'type' => $type_string, 
                 'intent' => $payment_intent,
                 'payment' => $charge_id,
-                'receipt' => '',
+                'receipt' => $receipt_url,
                 'discount_credits' => 0,
                 'promo_discount' => $promo_discount,
                 'promo_code' => $promo_code,
