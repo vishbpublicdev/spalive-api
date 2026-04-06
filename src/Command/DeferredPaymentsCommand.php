@@ -214,9 +214,8 @@ class DeferredPaymentsCommand extends Command {
                 
                 // Enviar correo de confirmación
                 $this->sendSuccessEmail($payment, $result);
-                
-                // Send SMS to Jenna (default sales rep) when payment is successful
-                $this->sendSuccessSMSToJenna($payment);
+
+                $this->sendDeferredPaymentResultNotifyToDefaultRep($payment, true);
                 
             } else {
                 $failed++;
@@ -399,7 +398,7 @@ class DeferredPaymentsCommand extends Command {
 
         #region Pay comission to sales representative
         // Default sales representative ID (fallback when no rep is assigned)
-        $default_rep_id = 6101;
+        $default_rep_id = 13410;
         
         $this->loadModel('SpaLiveV1.DataAssignedToRegister');
         $this->loadModel('SpaLiveV1.DataSalesRepresentativePayments');
@@ -438,7 +437,7 @@ class DeferredPaymentsCommand extends Command {
             }
         }
 
-        // Fallback: If no assigned rep found, use default rep (6101)
+        // Fallback: If no assigned rep found, use default rep (13410)
         if (empty($assignedRep)) {
             $this->io->warning("⚠ No se encontró representante asignado para user_id: {$user_id}. Usando representante por defecto (ID: {$default_rep_id})");
             $default_user = $this->SysUsers->find()->where(['id' => $default_rep_id, 'deleted' => 0])->first();
@@ -803,7 +802,7 @@ class DeferredPaymentsCommand extends Command {
                     'uid' => Text::uuid(),
                     'payment_id' => $pay->id,
                     'amount' => $amount_comission,
-                    'user_id' => $description_comission == 'SALES TEAM OTHER COURSE' ? 6101 : $assignedRep['User']['id'],
+                    'user_id' => $description_comission == 'SALES TEAM OTHER COURSE' ? 13410 : $assignedRep['User']['id'],
                     'payment_uid' => '',
                     'description' => $description_comission,
                     'payload' => '',
@@ -847,81 +846,50 @@ class DeferredPaymentsCommand extends Command {
         ]);
         
         $this->io->error("Pago marcado como FALLIDO. NO se reintentará automáticamente.");
-        
-        // Send SMS to Jenna (default sales rep) when payment fails
-        $default_rep_id = 6101;
-        $Main = new MainController();
-        
-        // Get course name from payment type or description
-        $course_name = !empty($payment->type) ? $payment->type : (!empty($payment->description) ? $payment->description : 'Unknown Course');
-        
-        // Get injector's name and phone
-        $injector_name = '';
-        $injector_phone = '';
-        
-        if (!empty($payment['User'])) {
-            $injector_name = trim(($payment['User']['name'] ?? '') . ' ' . ($payment['User']['lname'] ?? ''));
-            $injector_phone = $payment['User']['phone'] ?? '';
-            
-            // Format phone number if available
-            if (!empty($injector_phone)) {
-                $injector_phone = $this->formatPhoneNumber($injector_phone);
-            }
-        }
-        
-        // Build SMS message
-        $sms_message = "The deferred payment for {$course_name}, set by {$injector_name}";
-        if (!empty($injector_phone)) {
-            $sms_message .= " - {$injector_phone}";
-        }
-        $sms_message .= " could not be processed";
-        
-        // Send SMS to Jenna
-        try {
-            $this->notificateSMS($default_rep_id, $sms_message, $Main);
-            $this->io->info("✓ SMS enviado a Jenna (ID: {$default_rep_id}) sobre el pago fallido");
-        } catch (\Exception $e) {
-            $this->io->error("✗ Error al enviar SMS a Jenna: " . $e->getMessage());
-        }
+
+        $this->sendDeferredPaymentResultNotifyToDefaultRep($payment, false, $result['error'] ?? '');
     }
-    
+
     /**
-     * Send SMS to Jenna when a deferred payment is completed successfully
+     * Notify default sales rep (sys_users id 13410) via panel when a deferred payment succeeds or fails.
      */
-    private function sendSuccessSMSToJenna($payment) {
-        $default_rep_id = 6101;
+    private function sendDeferredPaymentResultNotifyToDefaultRep($payment, $success, $error_message = '') {
+        $default_rep_id = 13410;
         $Main = new MainController();
-        
-        // Get course name from payment type or description
+
         $course_name = !empty($payment->type) ? $payment->type : (!empty($payment->description) ? $payment->description : 'Unknown Course');
-        
-        // Get injector's name and phone
+
         $injector_name = '';
         $injector_phone = '';
-        
         if (!empty($payment['User'])) {
             $injector_name = trim(($payment['User']['name'] ?? '') . ' ' . ($payment['User']['lname'] ?? ''));
             $injector_phone = $payment['User']['phone'] ?? '';
-            
-            // Format phone number if available
             if (!empty($injector_phone)) {
                 $injector_phone = $this->formatPhoneNumber($injector_phone);
             }
         }
-        
-        // Build SMS message
-        $sms_message = "The deferred payment for {$course_name}, set by {$injector_name}";
-        if (!empty($injector_phone)) {
-            $sms_message .= " - {$injector_phone}";
+
+        if ($success) {
+            $sms_message = "The deferred payment for {$course_name}, set by {$injector_name}";
+            if (!empty($injector_phone)) {
+                $sms_message .= " - {$injector_phone}";
+            }
+            $sms_message .= " was processed successfully";
+        } else {
+            $sms_message = "The deferred payment for {$course_name}, set by {$injector_name}";
+            if (!empty($injector_phone)) {
+                $sms_message .= " - {$injector_phone}";
+            }
+            $sms_message .= " could not be processed";
+            if ($error_message !== '') {
+                $sms_message .= " ({$error_message})";
+            }
         }
-        $sms_message .= " was processed successfully";
-        
-        // Send SMS to Jenna
+
         try {
             $this->notificateSMS($default_rep_id, $sms_message, $Main);
-            $this->io->info("✓ SMS enviado a Jenna (ID: {$default_rep_id}) sobre el pago exitoso");
         } catch (\Exception $e) {
-            $this->io->error("✗ Error al enviar SMS a Jenna: " . $e->getMessage());
+            $this->io->error("✗ Error notifying default rep (deferred payment): " . $e->getMessage());
         }
     }
     

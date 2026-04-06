@@ -7871,23 +7871,20 @@ class PaymentsController extends AppPluginController{
                     curl_setopt($curl, CURLOPT_POSTFIELDS, $data);
                     $result = curl_exec($curl);
                     curl_close($curl);
-                    
-                    if(!$isDev){
-                        try {           
-                            $sid    = env('TWILIO_ACCOUNT_SID'); 
-                            $token  = env('TWILIO_AUTH_TOKEN'); 
-                            $twilio = new Client($sid, $token); 
-                                
-                            $message = $twilio->messages 
-                                        ->create( '+1' . '9034366629', // to 
-                                                array(  
-                                                    "messagingServiceSid" => "MG65978a5932f4ba9dd465e05d7b22195e",      
-                                                    "body" => 'New weight loss purchase: ' . USER_NAME . ' ' . USER_LNAME . ' (' . USER_PHONE .')'
-                                                ) 
-                                        ); 
-                            } catch (TwilioException $e) {
 
-                            }
+                    if (!$isDev) {
+                        try {
+                            $sid = env('TWILIO_ACCOUNT_SID');
+                            $token = env('TWILIO_AUTH_TOKEN');
+                            $twilio = new Client($sid, $token);
+
+                            $twilio->messages->create('+1' . '9518168768', [
+                                'messagingServiceSid' => 'MG65978a5932f4ba9dd465e05d7b22195e',
+                                'body' => 'New weight loss purchase: ' . USER_NAME . ' ' . USER_LNAME . ' (' . USER_PHONE . ')',
+                            ]);
+                        } catch (TwilioException $e) {
+
+                        }
                     }
                 }
 
@@ -8739,22 +8736,19 @@ class PaymentsController extends AppPluginController{
 
                     $isDev = env('IS_DEV', false);
 
-                    if(!$isDev){
-                        try {           
-                            $sid    = env('TWILIO_ACCOUNT_SID'); 
-                            $token  = env('TWILIO_AUTH_TOKEN'); 
-                            $twilio = new Client($sid, $token); 
-                                
-                            $message = $twilio->messages 
-                                        ->create( '+1' . '9034366629', // to 
-                                                array(  
-                                                    "messagingServiceSid" => "MG65978a5932f4ba9dd465e05d7b22195e",      
-                                                    "body" => 'The injector ' . USER_NAME . ' ' . USER_LNAME . ' (' . USER_PHONE .') from another school has paid the subscription.'
-                                                ) 
-                                        ); 
-                            } catch (TwilioException $e) {
+                    if (!$isDev) {
+                        try {
+                            $sid = env('TWILIO_ACCOUNT_SID');
+                            $token = env('TWILIO_AUTH_TOKEN');
+                            $twilio = new Client($sid, $token);
 
-                            }
+                            $twilio->messages->create('+1' . '9518168768', [
+                                'messagingServiceSid' => 'MG65978a5932f4ba9dd465e05d7b22195e',
+                                'body' => 'The injector ' . USER_NAME . ' ' . USER_LNAME . ' (' . USER_PHONE . ') from another school has paid the subscription.',
+                            ]);
+                        } catch (TwilioException $e) {
+
+                        }
                     }
 
                     #endregion
