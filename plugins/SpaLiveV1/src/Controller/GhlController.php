@@ -1779,7 +1779,7 @@ class GhlController extends AppPluginController {
         if($data['type'] == 'ContactTagUpdate'){
             if(isset($data['id']) && isset($data['tags'])){
                 $sales_array = array(
-                    'jenna' => array('id' => 6101, 'email' => 'jennaleighbichler@gmail.com', 'name' => 'Jenna Bichler'),
+                    'jenna' => array('id' => 13410, 'email' => 'jennaleighbichler@gmail.com', 'name' => 'Jenna Bichler'),
                     'jess' => array('id' => 8468, 'email' => 'jessicalynndejong@gmail.com', 'name' => 'Jessica deJong'),
                     'carly' => array('id' => 24735, 'email' => 'icaarly760@gmail.com', 'name' => 'Carly Camargo'),
                     'april' => array('id' => 20313, 'email' => 'southernedcharm@gmail.com', 'name' => 'April McClure'),
@@ -1919,7 +1919,7 @@ class GhlController extends AppPluginController {
         if(Count($users) > 0){
             foreach($users as $user){
                 $sales_array = array(
-                    6101 => 'jenna',
+                    13410 => 'jenna',
                     8468 => 'jess',
                     24735 => 'carly',
                     20313 => 'april',

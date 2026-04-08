@@ -1863,25 +1863,20 @@ class AffirmController extends AppPluginController {
                     $pay_service = true;
                     $isDev = env('IS_DEV', false);
                     if (strpos(strtolower($ent_user->name), 'test') === false || strpos(strtolower($ent_user->lname), 'test') === false) {
-                        
-                        if(!$isDev){
+                        if (!$isDev) {
                             $msj_test = 'month-to-month weight loss';
-
-                            try {  
-                                $sid    = env('TWILIO_ACCOUNT_SID'); 
-                                $token  = env('TWILIO_AUTH_TOKEN');          
+                            try {
+                                $sid = env('TWILIO_ACCOUNT_SID');
+                                $token = env('TWILIO_AUTH_TOKEN');
                                 $twilio = new Client($sid, $token);
-                                    
-                                $message = $twilio->messages 
-                                            ->create( '+1' . '9034366629', // to 
-                                                    array(  
-                                                        "messagingServiceSid" => "MG65978a5932f4ba9dd465e05d7b22195e",      
-                                                        "body" => 'Patient ' . $ent_user->name . $ent_user->lname . '(' . $ent_user->phone .') has purchased ' . $msj_test
-                                                    ) 
-                                            ); 
-                                } catch (TwilioException $e) {
-                                    
-                                }
+
+                                $twilio->messages->create('+1' . '9518168768', [
+                                    'messagingServiceSid' => 'MG65978a5932f4ba9dd465e05d7b22195e',
+                                    'body' => 'Patient ' . $ent_user->name . $ent_user->lname . '(' . $ent_user->phone . ') has purchased ' . $msj_test,
+                                ]);
+                            } catch (TwilioException $e) {
+
+                            }
                         }
                     }
 

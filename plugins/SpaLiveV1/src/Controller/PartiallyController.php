@@ -1095,8 +1095,7 @@ class PartiallyController extends AppPluginController {
             // Send error email
             $this->sendDeferredPaymentErrorEmail($deferred_payment, $error_message);
 
-            // Notify Jenna about failed payment
-            $this->sendFailedSMSToJenna($deferred_payment, $error_message);
+            $this->notifyDefaultRepDeferredPaymentFailed($deferred_payment, $error_message);
 
             $this->success();
             return;
@@ -2372,47 +2371,41 @@ class PartiallyController extends AppPluginController {
         }
     }
 
-    private function sendFailedSMSToJenna($payment, $error_message) {
-        $default_rep_id = 6101; // Jenna's user ID
+    /**
+     * Notify default sales rep (sys_users id 13410) when a Partial.ly deferred payment fails.
+     */
+    private function notifyDefaultRepDeferredPaymentFailed($payment, $error_message) {
+        $default_rep_id = 13410;
         $Main = new MainController();
-        
-        // Get course name from payment type or description
+
         $course_name = !empty($payment->type) ? $payment->type : (!empty($payment->description) ? $payment->description : 'Unknown Course');
-        
-        // Get injector's name and phone
+
         $injector_name = '';
         $injector_phone = '';
-        
         if (!empty($payment['User'])) {
             $injector_name = trim(($payment['User']['name'] ?? '') . ' ' . ($payment['User']['lname'] ?? ''));
             $injector_phone = $payment['User']['phone'] ?? '';
-            
-            // Format phone number if available
             if (!empty($injector_phone)) {
                 $injector_phone = $this->formatPhoneNumber($injector_phone);
             }
         }
-        
-        // Handle scheduled_date - it can be a DateTime object or a string
+
         if (is_object($payment->scheduled_date)) {
             $payment_date = $payment->scheduled_date->format('F d, Y');
         } else {
             $payment_date = date('F d, Y', strtotime($payment->scheduled_date));
         }
-        
-        // Build SMS message
+
         $sms_message = "Payment FAILED for {$course_name} scheduled on {$payment_date}, set by {$injector_name}";
         if (!empty($injector_phone)) {
             $sms_message .= " - {$injector_phone}";
         }
         $sms_message .= ". Error: {$error_message}";
-        
-        // Send SMS to Jenna
+
         try {
             $this->notificateSMS($default_rep_id, $sms_message, $Main);
         } catch (\Exception $e) {
-            // Log error but don't break the flow
-            $this->log(__LINE__ . ' Error sending SMS to Jenna: ' . $e->getMessage());
+            $this->log(__LINE__ . ' Error notifying default rep (deferred payment failed): ' . $e->getMessage());
         }
     }
 

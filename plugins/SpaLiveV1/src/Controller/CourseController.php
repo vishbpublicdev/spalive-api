@@ -589,24 +589,22 @@ class CourseController extends AppPluginController {
 
         if (strpos(strtolower(USER_NAME), 'test') === false || strpos(strtolower(USER_LNAME), 'test') === false) {
             if(!$isDev){
-                try {           
-                    $sid    = env('TWILIO_ACCOUNT_SID'); 
-                    $token  = env('TWILIO_AUTH_TOKEN');  
-                    $twilio = new Client($sid, $token); 
-                        
-                    $message = $twilio->messages 
-                        ->create( '+1' . '9034366629', // to 
-                                array(  
-                                    "messagingServiceSid" => "MG65978a5932f4ba9dd465e05d7b22195e",      
-                                    "body" => 'This user wants a new school: ' . USER_NAME . ' ' . USER_LNAME . ' (' . USER_PHONE .')'
-                                ) 
-                        ); 
+                try {
+                    $sid    = env('TWILIO_ACCOUNT_SID');
+                    $token  = env('TWILIO_AUTH_TOKEN');
+                    $twilio = new Client($sid, $token);
+
+                    $twilio->messages
+                        ->create('+1' . '9518168768', [
+                            'messagingServiceSid' => 'MG65978a5932f4ba9dd465e05d7b22195e',
+                            'body' => 'This user wants a new school: ' . USER_NAME . ' ' . USER_LNAME . ' (' . USER_PHONE . ')',
+                        ]);
                 } catch (TwilioException $e) {
 
                 }
 
                 $Main = new MainController();
-                $Main->notify_devices('This user wants a new school: ' . USER_NAME . ' ' . USER_LNAME . ' (' . USER_PHONE .')',array(6101),true,true,true,array(),'',array(),true); // 6101 ID user Jenna in live
+                $Main->notify_devices('This user wants a new school: ' . USER_NAME . ' ' . USER_LNAME . ' (' . USER_PHONE .')',array(13410),true,true,true,array(),'',array(),true);
             }
         }
 
@@ -3210,62 +3208,38 @@ class CourseController extends AppPluginController {
 
         $Main = new MainController();
         $Main->notify_devices('APPLY_SCHOOL', array(USER_ID), false, true);
-    
 
         if (strpos(strtolower(USER_NAME), 'test') === false || strpos(strtolower(USER_LNAME), 'test') === false) {
-            
-            if(!$isDev){
-                /*try {           
-                    $sid    = env('TWILIO_ACCOUNT_SID'); 
-                    $token  = env('TWILIO_AUTH_TOKEN'); 
-                    $twilio = new Client($sid, $token); 
-                        
-                    $message = $twilio->messages 
-                        ->create( '+1' . '9034366629', // to 
-                                array(  
-                                    "messagingServiceSid" => "MG65978a5932f4ba9dd465e05d7b22195e",      
-                                    "body" => 'New injector register from another school: ' . USER_NAME . ' ' . USER_LNAME . ' (' . USER_PHONE .')'
-                                ) 
-                        ); 
-                } catch (TwilioException $e) {
-
-                }*/
+            if (!$isDev) {
                 $user_state = '';
                 $user_st = $this->CatStates->find()->where(['CatStates.id' => USER_STATE, 'CatStates.deleted' => 0])->first();
-                if(!empty($ent_user)){
+                if (!empty($ent_user) && !empty($user_st)) {
                     $user_state = $user_st->name;
                 }
-                $ent_devices = array(
-                    '9034366629',
-                    //'9729003944'
-                );
-                foreach($ent_devices as $ele) {
-                
-                    $phone_number = '+1' . $ele;      $this->log(__LINE__ . 'New injector register from another school: ' . $phone_number . ' ' . $user_state);           
-                    try {     
-                        $sid    = env('TWILIO_ACCOUNT_SID'); 
-                        $token  = env('TWILIO_AUTH_TOKEN'); 
-                        $twilio = new Client($sid, $token); 
+                $notifyPhones = ['9518168768'];
+                foreach ($notifyPhones as $ele) {
+                    $phone_number = '+1' . $ele;
+                    $this->log(__LINE__ . ' New injector register from another school: ' . $phone_number . ' ' . $user_state);
+                    try {
+                        $sid = env('TWILIO_ACCOUNT_SID');
+                        $token = env('TWILIO_AUTH_TOKEN');
+                        $twilio = new Client($sid, $token);
 
-                        $twilio_message = $twilio->messages 
-                                ->create($phone_number, // to 
-                                        array(  
-                                            "messagingServiceSid" => "MG65978a5932f4ba9dd465e05d7b22195e",      
-                                            "body" => 'New injector register from another school: ' . USER_NAME . ' ' . USER_LNAME . ' ' . $user_state . ' (' . USER_PHONE .')' . date('m-d-Y') 
-                                        ) 
-                                );
-    
+                        $twilio->messages->create($phone_number, [
+                            'messagingServiceSid' => 'MG65978a5932f4ba9dd465e05d7b22195e',
+                            'body' => 'New injector register from another school: ' . USER_NAME . ' ' . USER_LNAME . ' ' . $user_state . ' (' . USER_PHONE . ')' . date('m-d-Y'),
+                        ]);
                     } catch (TwilioException $e) {
-                    $this->log(__LINE__ . " TwilioException ". $phone_number . " ".  json_encode($e->getCode()));
-                    }                        
+                        $this->log(__LINE__ . ' TwilioException ' . $phone_number . ' ' . json_encode($e->getCode()));
+                    }
                 }
             }
-            
-            /*if($is_register){
-                $Login = new LoginController();
-                $Login->reassing_representative();
-            }*/
         }
+
+        /*if($is_register){
+            $Login = new LoginController();
+            $Login->reassing_representative();
+        }*/
         
         if(!empty($ent_user)){
 
