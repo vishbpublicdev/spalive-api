@@ -21597,105 +21597,76 @@ class MainController extends AppPluginController {
         if ($notify_sms /*&& $av_result && $is_dev === false */) {
             
             $notification_type = 'SMS';
-            $str_str_users = $arr_users;
 
-            $this->loadModel('SpaLiveV1.SysUsers');
-            $array_conditions = [];
-            $array_conditions['SysUsers.id IN'] = $arr_users;
-            $array_conditions['SysUsers.is_test'] = 0;
-            
-            $ent_devices = $this->SysUsers->find()
-            ->join([
-                'ApiDevice' => ['table' => 'api_devices', 'type' => 'LEFT', 'conditions' => 'ApiDevice.user_id = SysUsers.id'],
-                'NS' => ['table' => 'data_notifications_settings', 'type' => 'LEFT', 'conditions' => 'NS.user_id = ApiDevice.user_id AND (NS.allow_sms = 1 OR NS.allow_sms IS NULL)']
-            ])
-            ->where($array_conditions)->toArray();
-            
-            $fixed_numbers = array();
-
-            foreach($fixed_numbers as $num) {
-                
-                try {           
-                    $sid    = env('TWILIO_ACCOUNT_SID'); 
-                    $token  = env('TWILIO_AUTH_TOKEN'); 
-                    $twilio = new Client($sid, $token); 
-                    
-                    $twilio_message = $twilio->messages 
-                              ->create($num, // to 
-                                       array(  
-                                           "messagingServiceSid" => "MG65978a5932f4ba9dd465e05d7b22195e",      
-                                           "body" => $conf_body_push 
-                                       ) 
-                              ); 
-                 } catch (TwilioException $e) {
-                 }
+            $ent_devices = [];
+            if (!empty($arr_users)) {
+                $this->loadModel('SpaLiveV1.SysUsers');
+                // Single query: IN uses primary key index; avoids FIND_IN_SET on a huge comma string (slow, no index use).
+                $ent_devices = $this->SysUsers->find()
+                    ->select(['phone' => 'SysUsers.phone'])
+                    ->leftJoin(
+                        ['NS' => 'data_notifications_settings'],
+                        ['NS.user_id = SysUsers.id']
+                    )
+                    ->where([
+                        'SysUsers.id IN' => $arr_users,
+                        'SysUsers.is_test' => 0,
+                        'OR' => [
+                            'NS.allow_sms' => 1,
+                            'NS.allow_sms IS' => null,
+                        ],
+                    ])
+                    ->order(['SysUsers.id' => 'ASC'])
+                    ->enableHydration(false)
+                    ->toArray();
             }
-            
-            $this->loadModel('SpaLiveV1.SysUsers');         
-            $str_str_users = implode(",",$arr_users);   
-            $str_query = "SELECT *   
-                FROM sys_users SU LEFT JOIN data_notifications_settings NS ON NS.user_id = SU.id       
-                WHERE 
-                    (NS.allow_sms = 1 OR NS.allow_sms IS NULL) AND 
-                    SU.is_test = 0 AND
-                    FIND_IN_SET(SU.id,'{$str_str_users}')";
-                
-            $ent_devices = $this->SysUsers->getConnection()->execute($str_query)->fetchAll('assoc');      
-            if($bulk){
-                $twilio_number = "+19516434078";
-                foreach($ent_devices as $ele) {
-                    
-                    $phone_number = '+1' . $ele['phone'];                
-                    try {     
-                        $sid    = env('TWILIO_ACCOUNT_SID'); 
-                        $token  = env('TWILIO_AUTH_TOKEN'); 
-                        $twilio = new Client($sid, $token); 
-                        
-                        $twilio_message = $twilio->messages 
-                                ->create($phone_number, // to 
-                                        array(  
-                                            //"messagingServiceSid" => "MG65978a5932f4ba9dd465e05d7b22195e",      
-                                            "body" => $conf_body_push,
-                                            'from' => $twilio_number, 
-                                        ) 
-                                ); 
-                        $account_sid = $twilio_message->accountSid;
-                        //$Webhook->get_twilio_messages($twilio_message);
 
-                        
+            if (!empty($ent_devices)) {
+                // Allow long bulk runs; adjust server/proxy limits separately if the request still aborts.
+                set_time_limit(0);
+                ini_set('max_execution_time', '0');
 
-                    } catch (TwilioException $e) {
-                        $this->log(__LINE__ . " TwilioException bulk ". $phone_number . " ". $conf_body_push. " ". json_encode($e->getCode()));
+                // First 500 were already sent in a previous run — skip them (order matches that run via ORDER BY id).
+                $ent_devices = array_slice($ent_devices, 500);
+
+                if (!empty($ent_devices)) {
+                    $sid = env('TWILIO_ACCOUNT_SID');
+                    $token = env('TWILIO_AUTH_TOKEN');
+                    $twilio = new Client($sid, $token);
+                    $twilio_number = "+19516434078";
+                    $smsCount = count($ent_devices);
+                    $smsIndex = 0;
+
+                    foreach ($ent_devices as $ele) {
+                        $phone_number = '+1' . $ele['phone'];
+                        try {
+                            if ($bulk) {
+                                $twilio_message = $twilio->messages
+                                    ->create($phone_number, [
+                                        'body' => $conf_body_push,
+                                        'from' => $twilio_number,
+                                    ]);
+                            } else {
+                                $twilio_message = $twilio->messages
+                                    ->create($phone_number, [
+                                        'messagingServiceSid' => 'MG65978a5932f4ba9dd465e05d7b22195e',
+                                        'body' => $conf_body_push,
+                                    ]);
+                            }
+                            $account_sid = $twilio_message->accountSid;
+                        } catch (TwilioException $e) {
+                            if ($bulk) {
+                                $this->log(__LINE__ . ' TwilioException bulk ' . $phone_number . ' ' . $conf_body_push . ' ' . json_encode($e->getCode()));
+                            } else {
+                                $this->log(__LINE__ . ' TwilioException ' . $phone_number . ' ' . $conf_body_push . ' ' . json_encode($e->getCode()));
+                            }
+                        }
+                        // Twilio messaging rate ~1 MPS for this account; wait before the next send.
+                        $smsIndex++;
+                        if ($smsIndex < $smsCount) {
+                            sleep(1);
+                        }
                     }
-                    
-
-                }
-            }else{
-                foreach($ent_devices as $ele) {
-                    
-                    $phone_number = '+1' . $ele['phone'];                
-                    try {     
-                        $sid    = env('TWILIO_ACCOUNT_SID'); 
-                        $token  = env('TWILIO_AUTH_TOKEN'); 
-                        $twilio = new Client($sid, $token); 
-                        
-                        $twilio_message = $twilio->messages 
-                                ->create($phone_number, // to 
-                                        array(  
-                                            "messagingServiceSid" => "MG65978a5932f4ba9dd465e05d7b22195e",      
-                                            "body" => $conf_body_push 
-                                        ) 
-                                ); 
-                        $account_sid = $twilio_message->accountSid;
-                        //$Webhook->get_twilio_messages($twilio_message);
-
-                        
-
-                    } catch (TwilioException $e) {
-                        $this->log(__LINE__ . " TwilioException ". $phone_number . " ". $conf_body_push. " ". json_encode($e->getCode()));
-                    }
-                    
-
                 }
             }
 
