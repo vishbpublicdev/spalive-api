@@ -19883,6 +19883,7 @@ class MainController extends AppPluginController {
 
         if($model == 'injector'){
             $this->loadModel('SpaLiveV1.DataTreatmentsPrice');
+            $servicesPriceEligibility = new ServicesHelper(USER_ID);
 
             if (count($arr_prices) > 0) {
                 $str_query_delete = "
@@ -19897,6 +19898,10 @@ class MainController extends AppPluginController {
                 $arr_inter = explode(",",$row);
 
                 if (count($arr_inter) < 2) continue;
+
+                if (!$servicesPriceEligibility->injector_may_set_price_for_ci_treatment((int)$arr_inter[0])) {
+                    continue;
+                }
 
                 
                 $p_entity = $this->DataTreatmentsPrice->find()->where(['DataTreatmentsPrice.treatment_id' => $arr_inter[0],'DataTreatmentsPrice.user_id' => USER_ID])->first();
