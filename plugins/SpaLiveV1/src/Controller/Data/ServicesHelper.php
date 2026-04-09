@@ -62,6 +62,14 @@ class ServicesHelper {
     public function applied_fillers(){
         return !empty($this->SHD->get_filler_application($this->user_id));
     }
+
+    /**
+     * True if injector may set CI price: non-OT rows or require_mdsub=0, or full eligibility (incl. MD when required).
+     */
+    public function injector_may_set_price_for_ci_treatment($ci_treatment_id)
+    {
+        return $this->SHD->injector_may_set_price_for_ci_treatment($this->user_id, $ci_treatment_id);
+    }
 }
 
 class ServicesHelperData extends AppPluginController
@@ -878,5 +886,26 @@ class ServicesHelperData extends AppPluginController
         }else{
             return false;
         }
+    }
+
+    public function injector_may_set_price_for_ci_treatment($user_id, $ci_treatment_id)
+    {
+        $this->loadModel('SpaLiveV1.CatTreatmentsCi');
+        $ent = $this->CatTreatmentsCi->find()
+            ->select(['name_key' => 'STOT.name_key', 'require_mdsub' => 'STOT.require_mdsub'])
+            ->join([
+                'CT' => ['table' => 'cat_treatments', 'type' => 'LEFT', 'conditions' => 'CT.id = CatTreatmentsCi.treatment_id AND CT.deleted = 0'],
+                'STOT' => ['table' => 'sys_treatments_ot', 'type' => 'LEFT', 'conditions' => 'STOT.id = CT.other_treatment_id AND STOT.deleted = 0'],
+            ])
+            ->where(['CatTreatmentsCi.id' => $ci_treatment_id, 'CatTreatmentsCi.deleted' => 0])
+            ->first();
+
+        if ($ent === null || $ent->name_key === null || $ent->name_key === '' || (int)$ent->require_mdsub !== 1) {
+            return true;
+        }
+
+        $step = $this->register_step_service($ent->name_key, $user_id);
+
+        return $step === 'DONE';
     }
 }

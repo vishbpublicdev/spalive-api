@@ -6637,6 +6637,7 @@ class LoginController extends AppPluginController{
 
         if($model == 'injector'){
             $this->loadModel('SpaLiveV1.DataTreatmentsPrice');
+            $servicesPriceEligibility = new ServicesHelper(USER_ID);
 
             if (count($arr_prices) > 0) {
                 $str_query_delete = "
@@ -6652,6 +6653,10 @@ class LoginController extends AppPluginController{
             
                
             
+                if (!empty($arr_inter[0]) && !$servicesPriceEligibility->injector_may_set_price_for_ci_treatment((int)$arr_inter[0])) {
+                    continue;
+                }
+
                 $p_entity = $this->DataTreatmentsPrice->find()->where(['DataTreatmentsPrice.treatment_id' => $arr_inter[0], 'DataTreatmentsPrice.user_id' => USER_ID])->first();
             
                 if (!empty($p_entity)) {
@@ -7110,6 +7115,7 @@ class LoginController extends AppPluginController{
 
         if(count($courses_user) > 0){
             $this->loadModel('SpaLiveV1.CatCITreatments');
+            $servicesHelperOtherTreatments = new ServicesHelper(USER_ID);
 
             $ot_treatments = [];
 
@@ -7117,7 +7123,7 @@ class LoginController extends AppPluginController{
                 $ot_treatments[] = $course_user->id;
             }
 
-            $ent_treatments = $this->CatCITreatments->find()->select(['CatCITreatments.id','CatCITreatments.treatment_id','CatCITreatments.name','CatCITreatments.product_id','CatCITreatments.max','CatCITreatments.details','CatCITreatments.min','CatCITreatments.qty','CatCITreatments.std_price','Product.comission_spalive','Exam.name', 'Exam.type_trmt', 'CTC.name', 'CTC.type'])
+            $ent_treatments = $this->CatCITreatments->find()->select(['CatCITreatments.id','CatCITreatments.treatment_id','CatCITreatments.name','CatCITreatments.product_id','CatCITreatments.max','CatCITreatments.details','CatCITreatments.min','CatCITreatments.qty','CatCITreatments.std_price','Product.comission_spalive','Exam.name', 'Exam.type_trmt', 'CTC.name', 'CTC.type','ot_name_key' => 'STOT.name_key'])
             ->where(['CatCITreatments.deleted' => 0,
                     'Exam.other_treatment_id IN' => $ot_treatments,
                     //'CatCITreatments.name IN' => $ot_treatments,
@@ -7125,6 +7131,7 @@ class LoginController extends AppPluginController{
             ])
             ->join([
                 'Exam' => ['table' => 'cat_treatments', 'type' => 'INNER', 'conditions' => 'Exam.id = CatCITreatments.treatment_id'],
+                'STOT' => ['table' => 'sys_treatments_ot', 'type' => 'INNER', 'conditions' => 'STOT.id = Exam.other_treatment_id AND STOT.deleted = 0'],
                 'CTC' => ['table' => 'cat_treatments_category', 'type' => 'INNER', 'conditions' => 'CTC.id = CatCITreatments.category_treatment_id'],
                 'Product' => ['table' => 'cat_products', 'type' => 'LEFT', 'conditions' => 'Product.id = CatCITreatments.product_id'],
                 //'StateAvailability' => ['table' => 'data_treatments_enabled_by_state', 'type' => 'LEFT', 'conditions' => 'StateAvailability.treatment_id = CatCITreatments.id'],
@@ -7133,6 +7140,10 @@ class LoginController extends AppPluginController{
             
             if(!empty($ent_treatments)){
                 foreach ($ent_treatments as $row) {
+                    $otKey = !empty($row['ot_name_key']) ? $row['ot_name_key'] : '';
+                    if ($otKey !== '' && $servicesHelperOtherTreatments->service_status($otKey) !== 'DONE') {
+                        continue;
+                    }
 
                     if($row['name'] == 'Let my provider help me decide') { continue; }
                     else if ($row['CTC']['name'] == 'Basic Neurotoxins') { $row['CTC']['name'] = 'Crows Feet, Frontalis, Glabella'; }

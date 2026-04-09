@@ -2485,6 +2485,38 @@ class SubscriptionController extends AppPluginController {
 
             }
 
+            // One row per other treatment (same as get_ot_subscription_info); avoids double MD/MSL charges.
+            if (!empty($ent_data_trainings)) {
+                $deduped_ot_rows = [];
+                foreach ($ent_data_trainings as $row) {
+                    $nk = $row->name ?? '';
+                    if ($nk === '') {
+                        continue;
+                    }
+                    if (!isset($deduped_ot_rows[$nk])) {
+                        $deduped_ot_rows[$nk] = $row;
+                    }
+                }
+                $ent_data_trainings = array_values($deduped_ot_rows);
+            }
+
+            $ent_subscription_msl_active = $this->DataSubscriptions->find()->where([
+                'DataSubscriptions.user_id' => USER_ID,
+                'DataSubscriptions.deleted' => 0,
+                'DataSubscriptions.status' => 'ACTIVE',
+                'DataSubscriptions.subscription_type LIKE' => '%MSL%',
+            ])->first();
+            $previous_services = [];
+            if (!empty($ent_subscription_msl_active)) {
+                $ps = $ent_subscription_msl_active->main_service;
+                if (!empty($ent_subscription_msl_active->addons_services)) {
+                    $ps .= ',' . $ent_subscription_msl_active->addons_services;
+                }
+                $previous_services = array_values(array_filter(array_map('trim', explode(',', $ps)), function ($s) {
+                    return $s !== '';
+                }));
+            }
+
             $_total_md = 0;
             $_total_msl = 0;
             $subs_md = [];
@@ -2566,10 +2598,7 @@ class SubscriptionController extends AppPluginController {
             
             foreach($ent_data_trainings as $row) {
 
-                $total_msl_coverage = $row->total_coverage;
-                $treatment_names = $row->treatment_names;
-
-                if (!empty($row->md_agreement) && !empty($row->md_agreement) && (empty($row->md) || empty($row->msl)) ) continue;
+                if (!empty($row->md_agreement) && !empty($row->msl_agreement) && (empty($row->md) || empty($row->msl)) ) continue;
                 
                 $tmp_total = 0;
 
@@ -2590,14 +2619,42 @@ class SubscriptionController extends AppPluginController {
                 }
             }
 
+            $total_msl_coverage = 0;
+            $treatment_names = '';
+            if (!empty($ent_data_trainings)) {
+                if ($is_other_schools) {
+                    $nameList = [];
+                    foreach ($ent_data_trainings as $row) {
+                        if (!empty($row->name)) {
+                            $nameList[] = $row->name;
+                        }
+                    }
+                    $treatment_names = implode(',', $nameList);
+                    $total_msl_coverage = count($ent_data_trainings);
+                } else {
+                    foreach ($ent_data_trainings as $row) {
+                        $total_msl_coverage = (int) $row->total_coverage;
+                        if ($total_msl_coverage !== count($ent_data_trainings)) {
+                            $total_msl_coverage = count($ent_data_trainings);
+                        }
+                        $treatment_names = $row->treatment_names;
+                    }
+                }
+                $total_msl_coverage = $total_msl_coverage + count($previous_services);
+            }
+
             if($total_msl_coverage > 0){
-                $_total_msl += $this->prices_msl[$total_msl_coverage - 1];
-                $array_treatment_names = explode(',', $treatment_names);
-                $main_service_msl = $array_treatment_names[0];
+                $index = max(0, min($total_msl_coverage - 1, count($this->prices_msl) - 1));
+                $_total_msl += $this->prices_msl[$index];
+                $array_treatment_names = array_values(array_filter(array_map('trim', explode(',', $treatment_names)), function ($s) {
+                    return $s !== '';
+                }));
+                $main_service_msl = $array_treatment_names[0] ?? '';
                 if(count($array_treatment_names) > 1){
                     $subs_msl_addons = array_slice($array_treatment_names, 1);
                 }
-                $price_individual = $this->prices_msl[$total_msl_coverage - 1] / $total_msl_coverage;
+                $names_count = max(1, count($array_treatment_names));
+                $price_individual = $this->prices_msl[$index] / $names_count;
                 foreach($array_treatment_names as $treatment_name){
                     $subs_msl[$treatment_name] = $price_individual;
                 }
@@ -2640,7 +2697,7 @@ class SubscriptionController extends AppPluginController {
             $this->loadModel('SpaLiveV1.DataSubscriptionPayments');
 
             $addon_services = '';
-            $addon_services = implode(',', $subs_msl_addons);
+            $addon_services = $this->normalize_addons_services(implode(',', $subs_msl_addons));
                     
             // Inicializar variables de pago
             $error = '';
@@ -2746,7 +2803,7 @@ class SubscriptionController extends AppPluginController {
                 if (count($subs_md) > 0) {
 
                     $addon_services = '';
-                    $addon_services = implode(',', $subs_md_addons);
+                    $addon_services = $this->normalize_addons_services(implode(',', $subs_md_addons));
 
                     $m_entity = $this->DataSubscriptions->newEntity([
                         'uid'		=> $this->DataSubscriptions->new_uid(),
@@ -2810,7 +2867,7 @@ class SubscriptionController extends AppPluginController {
                     $aux_payment = $this->DataSubscriptionPayments->save($c_entity);
 
                     if (count($subs_md) > 0) {
-                        $addon_services_md = implode(',', $subs_md_addons);
+                        $addon_services_md = $this->normalize_addons_services(implode(',', $subs_md_addons));
                         
                         $z_entity = $this->DataSubscriptionPayments->newEntity([
                             'uid'   => Text::uuid(),
@@ -5524,6 +5581,12 @@ class SubscriptionController extends AppPluginController {
             ])
             ->first();
 
+            if (empty($ent_subscription)) {
+                // First purchase: summary already shows MSL+MD totals but no row exists yet — same flow as save_subscription_ot
+                $this->save_subscription_ot();
+                return;
+            }
+
             $ent_payments_subscription = $this->DataSubscriptionPayments->find()
             ->where([
                 'DataSubscriptionPayments.subscription_id' => $ent_subscription->id,
@@ -5539,6 +5602,9 @@ class SubscriptionController extends AppPluginController {
 
             $services_addons = $ent_subscription->addons_services;
             $payment_details = json_decode($ent_subscription->payment_details, true);
+            if (!is_array($payment_details)) {
+                $payment_details = [];
+            }
             $preview_total_msl = $ent_subscription->total;
 
             $services_addons = empty($services_addons) ? implode(',', $array_msl) : $services_addons . ',' . implode(',', $array_msl);
@@ -12165,6 +12231,21 @@ if (isset($arr_subscriptions['membership_msl_iv'])) {
                 ->group(['CatAgreementMD.id'])
                 ->all();
             }
+
+            // One line per other treatment: queries can return duplicate rows per name_key (e.g. multiple MD agreements); only one main + distinct add-ons.
+            if (!empty($ent_data_trainings)) {
+                $deduped_ot_rows = [];
+                foreach ($ent_data_trainings as $row) {
+                    $nk = $row->name_key ?? '';
+                    if ($nk === '') {
+                        continue;
+                    }
+                    if (!isset($deduped_ot_rows[$nk])) {
+                        $deduped_ot_rows[$nk] = $row;
+                    }
+                }
+                $ent_data_trainings = array_values($deduped_ot_rows);
+            }
             
             $total_msl_coverage = 0;
             $_total_md = 0;
@@ -12454,7 +12535,20 @@ if (isset($arr_subscriptions['membership_msl_iv'])) {
         ->group(['CatAgreementMD.id','CatAgreementMSL.id'])
         ->all();
 
-
+        // name_key is selected as "name"; avoid duplicate MD/MSL lines per treatment when multiple agreement rows exist
+        if (!empty($ent_data_trainings)) {
+            $deduped_school_ot = [];
+            foreach ($ent_data_trainings as $row) {
+                $nk = $row->name ?? '';
+                if ($nk === '') {
+                    continue;
+                }
+                if (!isset($deduped_school_ot[$nk])) {
+                    $deduped_school_ot[$nk] = $row;
+                }
+            }
+            $ent_data_trainings = array_values($deduped_school_ot);
+        }
 
         $_total_md = 0;
         $_total_msl = 0;

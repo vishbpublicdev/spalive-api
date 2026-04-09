@@ -7905,7 +7905,8 @@ class SummaryController extends AppPluginController{
                     ->find()
                     ->select([
                         'name_key' => 'OtherTreatment.name_key',
-                        'name' => 'OtherTreatment.name'
+                        'name' => 'OtherTreatment.name',
+                        'require_mdsub' => 'OtherTreatment.require_mdsub',
                     ])
                     ->join([
                         'Coverage' => [
@@ -7959,6 +7960,23 @@ class SummaryController extends AppPluginController{
                     
 
                     $status = $has_subscription ? 'DONE' : 'SUBSCRIBE';
+                    if ($has_subscription && !empty($service['require_mdsub']) && (int)$service['require_mdsub'] === 1) {
+                        $subscription_md = $this->DataSubscriptions->find()
+                            ->where([
+                                'DataSubscriptions.user_id' => $user_id,
+                                'DataSubscriptions.deleted' => 0,
+                                'DataSubscriptions.status' => 'ACTIVE',
+                                'DataSubscriptions.subscription_type LIKE' => '%MD%',
+                                'OR' => [
+                                    ['DataSubscriptions.main_service LIKE' => '%' . $service['name_key'] . '%'],
+                                    ['DataSubscriptions.addons_services LIKE' => '%' . $service['name_key'] . '%'],
+                                ],
+                            ])
+                            ->first();
+                        if (empty($subscription_md)) {
+                            $status = 'MD';
+                        }
+                    }
                     $agreement_msl = null;
                     $agreement_md = null;
 
@@ -8008,6 +8026,7 @@ class SummaryController extends AppPluginController{
                 'CatCourses.id',
                 'CatCourses.title',
                 'SysTreatmentOT.name_key',
+                'SysTreatmentOT.require_mdsub',
                 'DataCourses.course_id',
                 'SchoolOption.sys_treatment_ot_id',
                 'SysTreatmentOT.id',
@@ -8034,6 +8053,7 @@ class SummaryController extends AppPluginController{
             foreach ($new_records as $record) {
                 // Asumiendo que obtienes 'name_key' del registro
                 $new_key = $record['SysTreatmentOT']['name_key'];
+                $has_subscription = false;
 
                 // Buscar suscripción que contenga todos los servicios requeridos
                 $__where = [
@@ -8063,6 +8083,24 @@ class SummaryController extends AppPluginController{
                 
                 
                 $status = $has_subscription ? 'DONE' : 'SUBSCRIBE';
+                $req_md = !empty($record['SysTreatmentOT']['require_mdsub']) ? (int)$record['SysTreatmentOT']['require_mdsub'] : 0;
+                if ($has_subscription && $req_md === 1) {
+                    $subscription_md = $this->DataSubscriptions->find()
+                        ->where([
+                            'DataSubscriptions.user_id' => $user_id,
+                            'DataSubscriptions.deleted' => 0,
+                            'DataSubscriptions.status' => 'ACTIVE',
+                            'DataSubscriptions.subscription_type LIKE' => '%MD%',
+                            'OR' => [
+                                ['DataSubscriptions.main_service LIKE' => '%' . $new_key . '%'],
+                                ['DataSubscriptions.addons_services LIKE' => '%' . $new_key . '%'],
+                            ],
+                        ])
+                        ->first();
+                    if (empty($subscription_md)) {
+                        $status = 'MD';
+                    }
+                }
 
                 if (!in_array($new_key, $existing_keys)) {
                     $other_treatments_user[] = [
