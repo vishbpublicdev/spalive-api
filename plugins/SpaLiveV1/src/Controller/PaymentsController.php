@@ -10734,7 +10734,7 @@ foreach ($ent_query_dispute as $key => $value) {
         'order' => 15,
     ];*/
     $arr_description[] = [
-        'description' => 'Stripe Fee',
+        'description' => 'Credit Card Processing Fee',
         'total' => $total_fee ,
         'order' => 66,
     ];
@@ -11623,7 +11623,7 @@ foreach ($ent_query_dispute as $key => $value) {
         'order' => 15,
     ];*/
     $arr_description[] = [
-        'description' => 'Stripe Fee',
+        'description' => 'Credit Card Processing Fee',
         'total' => $total_fee ,
         'order' => 66,
     ];

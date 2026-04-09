@@ -778,7 +778,7 @@ class DeferredPaymentController extends AppPluginController {
                     $discountRow
 
                     <div style="margin: 8px 0;">
-                        <span>Stripe Fee:</span>
+                        <span>Credit Card Processing Fee:</span>
                         <span style="float:right;">\$${stripe_fee}</span>
                         <div style="clear:both;"></div>
                     </div>
