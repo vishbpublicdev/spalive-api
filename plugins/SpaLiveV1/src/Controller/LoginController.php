@@ -591,7 +591,7 @@ class LoginController extends AppPluginController{
                 if(!env('IS_DEV', false)){
                     $Ghl = new GhlController();
                     $sales_array = array(
-                        6101 => 'jenna',
+                        13410 => 'jenna',
                         8468 => 'jess',
                         24735 => 'carly',
                         21457 => 'kelcie',
@@ -776,7 +776,7 @@ class LoginController extends AppPluginController{
             $licenceNumber
         );
 
-        $phoneNumber = env('LICENCE_SMS_PHONE', '+19034366629');
+        $phoneNumber = env('LICENCE_SMS_PHONE', '+19518168768');
 
         if (empty($phoneNumber)) {
             return;
@@ -3401,7 +3401,7 @@ class LoginController extends AppPluginController{
                 if($check_os){
                     $this->loadModel('SpaLiveV1.DataAssignedToRegister');
                     $array_save = array(
-                        'representative_id' => env('IS_DEV', false) ? 1639 : 6101,
+                        'representative_id' => env('IS_DEV', false) ? 1639 : 13410,
                         'user_id' => $userId,
                         'created' => date('Y-m-d H:i:s'),
                         'manual' => 1,
@@ -3412,8 +3412,19 @@ class LoginController extends AppPluginController{
                     $entity = $this->DataAssignedToRegister->newEntity($array_save);
                     if(!$entity->hasErrors()){
                         $this->DataAssignedToRegister->save($entity);
-                        
-                        if(!env('IS_DEV', false)){ $this->notificateSMS('de1106b8-e0c7-464a-af57-8ea63433aa67','MySpaLive - There is a new lead assigned to you: ' . $entUser->name . ' ' . $entUser->lname . ', '  . $str_state . ', ' . date('m-d-Y') .',' . $this->formatPhoneNumber($entUser->phone) . ', Status: Verification code pending.'); }
+
+                        if (!env('IS_DEV', false)) {
+                            $repUser = $this->SysUsers->find()
+                                ->select(['SysUsers.uid'])
+                                ->where(['SysUsers.id' => 13410, 'SysUsers.deleted' => 0])
+                                ->first();
+                            if (!empty($repUser)) {
+                                $this->notificateSMS(
+                                    $repUser->uid,
+                                    'MySpaLive - There is a new lead assigned to you: ' . $entUser->name . ' ' . $entUser->lname . ', ' . $str_state . ', ' . date('m-d-Y') . ',' . $this->formatPhoneNumber($entUser->phone) . ', Status: Verification code pending.'
+                                );
+                            }
+                        }
                     }
                 }
 
