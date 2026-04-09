@@ -18,25 +18,32 @@ class SysUserAdminTable extends Table
     }
 
     public function getRandomDoctor($injector_id = 0){
-        //return 139;
-        /*$find = $this->getConnection()->query( "SELECT U.is_test FROM sys_users U WHERE U.id = {$patient_id} AND U.deleted = 0")->fetchAll('assoc');
-        if(isset($find[0])){
-            if ($find[0]['is_test'] == 1)
-                return -1;
-        }
-        //return 89;
-
-    	$doctors = $this->find()->select(['SysUserAdmin.id'])->where(['SysUserAdmin.user_type' => 'DOCTOR','SysUserAdmin.deleted' => 0])->toArray();
-    	$numDocts = sizeof($doctors);
-    	$pos = rand(0, ($numDocts - 1));
-    	return $doctors[$pos]['id'];*/ 
-        
-        $find = $this->getConnection()->query( "SELECT U.is_test, U.md_id FROM sys_users U WHERE U.id = {$injector_id} AND U.deleted = 0")->fetchAll('assoc');
-        if(isset($find[0])){
-            return $find[0]['md_id'];
-        }else{
+        // Pick among active DOCTOR rows in sys_users_admin, favoring the least-assigned md_id on sys_users (balanced load).
+        $doctorRows = $this->find()
+            ->select(['id'])
+            ->where(['SysUserAdmin.user_type' => 'DOCTOR', 'SysUserAdmin.deleted' => 0])
+            ->enableHydration(false)
+            ->toArray();
+        $doctorIds = array_map('intval', array_column($doctorRows, 'id'));
+        $doctorIds = array_values(array_filter($doctorIds, static fn ($id) => $id > 0));
+        if ($doctorIds === []) {
             return 0;
         }
+
+        $placeholders = implode(',', array_fill(0, count($doctorIds), '?'));
+        $sql = "SELECT md_id, COUNT(*) AS cnt FROM sys_users WHERE deleted = 0 AND md_id IN ($placeholders) GROUP BY md_id";
+        $stmt = $this->getConnection()->execute($sql, $doctorIds);
+        $countsByMd = array_fill_keys($doctorIds, 0);
+        foreach ($stmt->fetchAll('assoc') as $row) {
+            $mid = (int)$row['md_id'];
+            if (isset($countsByMd[$mid])) {
+                $countsByMd[$mid] = (int)$row['cnt'];
+            }
+        }
+
+        $minCount = min($countsByMd);
+        $candidates = array_keys(array_filter($countsByMd, static fn ($c) => $c === $minCount));
+        return (int)$candidates[array_rand($candidates)];
     }
 
 
