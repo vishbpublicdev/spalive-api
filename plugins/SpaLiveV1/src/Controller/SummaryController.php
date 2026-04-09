@@ -7665,7 +7665,7 @@ class SummaryController extends AppPluginController{
                     'type'  => $other_treatment['type'],
                     'training_id'  => $other_treatment['training_id'],
                     'data_training_id'  => $other_treatment['data_training_id'],
-                    'data_course_id'  => $other_treatment['data_course_id'],
+                    'data_course_id'  => $other_treatment['data_course_id'] ?? 0,
                     'title' => $other_treatment['title'],
                     'find'  => 'OTHER TREATMENTS', //$other_treatment['find'],
                     'name_key' => $other_treatment['name_key'],
@@ -7983,6 +7983,7 @@ class SummaryController extends AppPluginController{
                         'type' => $data_training->training_title,
                         'training_id' => $data_training->training_id,
                         'data_training_id' => $data_training->data_training_id,
+                        'data_course_id' => 0,
                         'title' => $service['name'], // Usar el name del servicio individual
                         'find' => 'OTHER TREATMENTS',
                         'name_key' => $service['name_key'], // Usar el name_key del servicio individual

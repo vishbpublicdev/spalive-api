@@ -36951,7 +36951,7 @@ class MainController extends AppPluginController {
                     $entity = $this->DataInjectorRegistered->newEntity([
                         'user_id' => $user_id,
                         'date_start' => date('Y-m-d H:i:s'),
-                        'type' => 'OTHER_TREATMENTS',
+                        'type' => 'OTHER_COURSE',
                         'deleted' => 0,
                     ]);
                     if (!$entity->hasErrors()) {
