@@ -394,6 +394,57 @@ class SubscriptionsCommand extends Command{
         return false;
     }
 
+    /**
+     * When the subscription charge is $0, skip Stripe and record a DONE payment so last_payment advances
+     * and the subscription is not moved to HOLD as a failed charge.
+     */
+    private function recordZeroDollarSubscriptionPayment($subscription_id, $user_id, $row, $amountCents = null)
+    {
+        if ($amountCents === null) {
+            $amountCents = (int) $row['total'];
+        } else {
+            $amountCents = (int) $amountCents;
+        }
+        if ($amountCents < 0) {
+            $amountCents = 0;
+        }
+
+        $md_id = $this->get_doctor($user_id, $row['subscription_type']);
+        $c_entity = $this->DataSubscriptionPayments->newEntity([
+            'uid' => Text::uuid(),
+            'subscription_id' => $subscription_id,
+            'user_id' => $user_id,
+            'total' => $amountCents,
+            'payment_id' => '',
+            'charge_id' => '',
+            'receipt_id' => '',
+            'created' => date('Y-m-d H:i:s'),
+            'error' => '',
+            'status' => 'DONE',
+            'deleted' => 0,
+            'md_id' => $md_id,
+            'payment_type' => 'FULL',
+            'payment_description' => $row['main_service'] . ', ' . $row['addons_services'],
+            'main_service' => $row['main_service'],
+            'addons_services' => $row['addons_services'],
+            'payment_details' => $row['payment_details'],
+            'state' => $row['User']['state'],
+        ]);
+
+        if ($c_entity->hasErrors()) {
+            return false;
+        }
+
+        $this->DataSubscriptionPayments->save($c_entity);
+        $this->DataSubscriptions->updateAll(
+            ['status' => 'ACTIVE'],
+            ['id' => $subscription_id]
+        );
+        $this->processPendingPayments($subscription_id, $user_id, $amountCents);
+
+        return true;
+    }
+
     private function execPayment($subscription_id,$user_id,$total,$customer_id,$payment_methods,$str_desc,$row) {
 
         if($row['monthly'] == '1'){
@@ -416,6 +467,10 @@ class SubscriptionsCommand extends Command{
             if($cancel){
                 return true;
             }
+        }
+
+        if ((int) $total <= 0) {
+            return $this->recordZeroDollarSubscriptionPayment($subscription_id, $user_id, $row, (int) $total);
         }
 
         foreach($payment_methods as $payment_method) {
@@ -964,6 +1019,10 @@ class SubscriptionsCommand extends Command{
                 $total += $detail[$value];
             }
 
+            if ((int) $total <= 0) {
+                return $this->recordZeroDollarSubscriptionPayment($subscription_id, $user_id, $row, (int) $total);
+            }
+
             foreach($payment_methods as $payment_method) {
                 \Stripe\Stripe::setApiKey(Configure::read('App.stripe_secret_key'));
                 $stripe_result = '';
@@ -1013,7 +1072,7 @@ class SubscriptionsCommand extends Command{
                   } catch (\Stripe\Exception\ApiErrorException $e) {
                     // Display a very generic error to the user, and maybe send
                     // yourself an email
-                    $error = $e->getMessage();
+                      $error = $e->getMessage();
                   }
     
                 $receipt_url = '';
