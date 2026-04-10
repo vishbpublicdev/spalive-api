@@ -33,6 +33,7 @@ use SpaLiveV1\Controller\CourseController;
 use SpaLiveV1\Controller\SubscriptionController;
 use SpaLiveV1\Controller\Data\TreatmentsHelper;
 use SpaLiveV1\Controller\Data\ServicesHelper;
+use SpaLiveV1\Controller\Data\NeuroLevel3AccessHelper;
 
 class SummarytstController extends AppPluginController{
 
@@ -7082,22 +7083,7 @@ class SummarytstController extends AppPluginController{
     }
     
     public function check_training_medical($user_id){
-        $this->loadModel('SpaLiveV1.DataTrainings');
-        $this->loadModel('SpaLiveV1.CatTrainigs');
-
-        $ent_training = $this->DataTrainings->find()
-        ->join([
-            'CatTrainigs' => ['table' => 'cat_trainings', 'type' => 'INNER', 'conditions' => 'CatTrainigs.id = DataTrainings.training_id'],
-        ])
-        ->where([
-            'DataTrainings.user_id' => $user_id,
-            'DataTrainings.deleted' => 0,
-            'DataTrainings.attended' => 1,
-            'CatTrainigs.level' => 'LEVEL 3 MEDICAL',
-            'CatTrainigs.deleted' => 0,
-        ])->first();
-
-        return !empty($ent_training) ? true : false;
+        return NeuroLevel3AccessHelper::userHasNeuroLevel3Access((int) $user_id);
     }
 
     public function get_agreements_patient(
