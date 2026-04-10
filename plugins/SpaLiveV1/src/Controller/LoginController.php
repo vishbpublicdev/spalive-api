@@ -6784,13 +6784,12 @@ class LoginController extends AppPluginController{
         // }
         
         $cc = new CourseController();
-        $ccc = new SummaryController();
         $trainings_user = $cc->get_courses_user(USER_ID);
         $has_basic_course = $trainings_user['has_basic_course'];
         $has_advanced_course = $trainings_user['has_advanced_course'];
         $this->set('has_basic_course',$has_basic_course);
         $this->set('has_advanced_course',$has_advanced_course);
-        $this->set('has_level3_course',$ccc->check_training_medical(USER_ID));
+        $this->set('has_level3_course', $trainings_user['has_level3_course']);
         /*if(!$has_basic_course){ // check in school 
             $result = array();            
             $this->loadModel('SpaLiveV1.DataCourses');
