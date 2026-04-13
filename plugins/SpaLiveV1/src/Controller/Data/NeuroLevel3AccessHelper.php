@@ -208,6 +208,50 @@ final class NeuroLevel3AccessHelper
     }
 
     /**
+     * @param mixed $value Cake Chronos, \DateTimeInterface, or datetime string
+     */
+    private static function toDateYmd($value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+        if ($value instanceof \DateTimeInterface) {
+            return $value->format('Y-m-d');
+        }
+        if (is_string($value)) {
+            try {
+                return (new \DateTimeImmutable($value))->format('Y-m-d');
+            } catch (\Exception $e) {
+                return null;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param mixed $value Cake Chronos, \DateTimeInterface, or datetime string
+     */
+    private static function toDateTimeStr($value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+        if ($value instanceof \DateTimeInterface) {
+            return $value->format('Y-m-d H:i:s');
+        }
+        if (is_string($value)) {
+            try {
+                return (new \DateTimeImmutable($value))->format('Y-m-d H:i:s');
+            } catch (\Exception $e) {
+                return null;
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * @param \Cake\Datasource\EntityInterface|array $row
      */
     private static function trainingRowIsDone($row, string $now, string $changeThreshold): bool
@@ -216,15 +260,14 @@ final class NeuroLevel3AccessHelper
         $scheduled = is_array($row) ? ($row['scheduled'] ?? null) : $row->get('scheduled');
         $attended = (int) (is_array($row) ? ($row['attended'] ?? 0) : $row->get('attended'));
 
-        if ($created === null || $scheduled === null) {
+        $createdStr = self::toDateYmd($created);
+        $scheduledStr = self::toDateTimeStr($scheduled);
+        if ($createdStr === null || $scheduledStr === null) {
             return false;
         }
 
-        $createdStr = $created->i18nFormat('yyyy-MM-dd');
         $isBeforeChange = $changeThreshold > $createdStr;
         if ($isBeforeChange) {
-            $scheduledStr = $scheduled->i18nFormat('yyyy-MM-dd HH:mm:ss');
-
             return $scheduledStr < $now;
         }
 
