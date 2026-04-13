@@ -30,6 +30,8 @@ use Firebase\JWT\Key;
 
 use SpaLiveV1\Controller\SubscriptionController;
 use SpaLiveV1\Controller\TherapyController;
+use SpaLiveV1\Controller\Data\NeuroLevel3AccessHelper;
+
 class CourseController extends AppPluginController {
      
     private $total = 3900;
@@ -4880,15 +4882,6 @@ class CourseController extends AppPluginController {
             })) > 0;
         }
 
-        $has_level3_course = false;
-        $level = 'LEVEL 3 MEDICAL'; 
-        if(array_key_exists($level, $user_courses)){
-            $status = 'DONE';
-            $has_level3_course = count(array_filter($user_courses[$level], function($course) use ($status) {
-                return $course['status'] == $status;
-            })) > 0;
-        }
-
         $courses_profile = array();
         foreach ($courses as $course) {
             $c_date = date('Y-m-d',strtotime('2023-02-27'));
@@ -4959,7 +4952,7 @@ class CourseController extends AppPluginController {
         $data = array(
             'has_basic_course'    =>  $has_basic_course,
             'has_advanced_course' =>  $has_advanced_course,
-            'has_level3_course'   =>  $has_level3_course,
+            'has_level3_course'   =>  NeuroLevel3AccessHelper::userHasNeuroLevel3Access((int) $user_id),
             'courses'             =>  $user_courses,
             'courses_profile'     =>  $courses_profile
         );

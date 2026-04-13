@@ -264,36 +264,6 @@ class TreatmentHelperData extends AppPluginController
     }
 
     public function check_training_medical($user_id){
-        $this->loadModel('SpaLiveV1.DataTrainings');
-        $this->loadModel('SpaLiveV1.CatTrainigs');
-
-        $ent_training = $this->DataTrainings->find()
-        ->join([
-            'CatTrainigs' => ['table' => 'cat_trainings', 'type' => 'INNER', 'conditions' => 'CatTrainigs.id = DataTrainings.training_id'],
-        ])
-        ->where([
-            'DataTrainings.user_id' => $user_id,
-            'DataTrainings.deleted' => 0,
-            'DataTrainings.attended' => 1,
-            'CatTrainigs.level' => 'LEVEL 3 MEDICAL',
-            'CatTrainigs.deleted' => 0,
-        ])->first();
-        
-        if (!empty($ent_training)) return true;
-
-        $user_course = $this->DataTrainings->find()
-        ->join([
-            'CatTrainings' => ['table' => 'cat_trainings', 'type' => 'INNER', 'conditions' => 'CatTrainings.id = DataTrainings.training_id'],
-            'CTC' => ['table' => 'cat_courses_type', 'type' => 'INNER', 'conditions' => 'CTC.name_key = CatTrainings.level'],
-            'DCC' => ['table' => 'data_coverage_courses', 'type' => 'INNER', 'conditions' => 'DCC.course_type_id = CTC.id'],
-            'STOT' => ['table' => 'sys_treatments_ot', 'type' => 'INNER', 'conditions' => 'STOT.id = DCC.ot_id'],
-        ])
-        ->where(['DataTrainings.user_id' => $user_id,'DataTrainings.deleted' => 0,'DataTrainings.attended' => 1,'CatTrainings.deleted' => 0,'STOT.name_key' => 'LEVEL3_NEUROTOXINS'])
-        ->first();
-
-        if (!empty($user_course)) return true;
-
-        return false;
-
+        return NeuroLevel3AccessHelper::userHasNeuroLevel3Access((int) $user_id);
     }
 }

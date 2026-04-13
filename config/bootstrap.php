@@ -90,6 +90,12 @@ if (file_exists(CONFIG . 'app_local.php')) {
     Configure::load('app_local', 'default');
 }
 
+try {
+    Configure::load('neuro_level3_access', 'default');
+} catch (\Exception $e) {
+    // Optional config file; ignore if missing
+}
+
 /*
  * When debug = true the metadata cache should only last
  * for a short time.
