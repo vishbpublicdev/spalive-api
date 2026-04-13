@@ -95,15 +95,26 @@ class QualiphyController extends AppPluginController{
             ),
         ));
         $response = curl_exec($curl);
-        $err = curl_error($curl);
-         
+        $err = (string) curl_error($curl);
+
         curl_close($curl);
 
-        $arr_response = json_decode($response,true);
+        $responseBody = is_string($response) ? $response : '';
+        $arr_response = json_decode($responseBody, true);
 
-        $arr_err = json_decode($err,true);
+        $arr_err = json_decode($err, true);
 
-        if(!empty($arr_err)){
+        $bad = !empty($arr_err) || $response === false || $err !== '' || !is_array($arr_response);
+        if (env('IS_DEV', false) && $bad) {
+            return [
+                'http_code' => 200,
+                'meeting_uuid' => Text::uuid(),
+                'meeting_url' => env('QUALIPHY_DEV_MEETING_URL', 'https://example.com/qualiphy-dev-stub'),
+                'patient_exams' => [['patient_exam_id' => 0]],
+            ];
+        }
+
+        if (!empty($arr_err)) {
             return false;
         }
 
