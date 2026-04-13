@@ -14668,7 +14668,7 @@ class MainController extends AppPluginController {
 
         //$assigned_doctor = rand(0,1) == 0 ? 'Dr Zach Cannon' : 'Dr Doohi Lee';
         $assigned_doctor = $this->SysUserAdmin->getRandomDoctor($assistance_id);
-        $assigned_doctor = 139 ;#marie
+        //$assigned_doctor = 139 ;#marie
         if (empty($schedule_date)) 
             $schedule_date = date('Y-m-d H:i:s');
 
@@ -25534,7 +25534,7 @@ class MainController extends AppPluginController {
         
         //$assigned_doctor = rand(0,1) == 0 ? 'Dr Zach Cannon' : 'Dr Doohi Lee';
         $assigned_doctor = $this->SysUserAdmin->getRandomDoctor($injector_id);
-        $assigned_doctor = 139 ;#marie
+        //$assigned_doctor = 139 ;#marie
         if (empty($schedule_date)) 
             $schedule_date = date('Y-m-d H:i:s');
 
