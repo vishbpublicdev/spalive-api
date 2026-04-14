@@ -5658,8 +5658,7 @@ class PaymentsController extends AppPluginController{
             return;
         }
         
-        //$year = get('year', 0);
-        $year = 2025;       
+        $year = get('year', 2025);
         if(empty($year)){
             $year = intval(date('Y'));  
         }          
@@ -8599,6 +8598,12 @@ class PaymentsController extends AppPluginController{
                     $id = $this->DataSubscriptions->save($s_entity);
                     $ent_user = $this->SysUsers->find()->where(['SysUsers.id' => USER_ID])->first();
 
+                    $this->loadModel('SpaLiveV1.SysUserAdmin');
+                    $paymentMdId = (int)($ent_user->md_id ?? 0);
+                    if (stripos($subscription_type, 'MD') !== false) {
+                        $paymentMdId = $this->SysUserAdmin->getAssignedDoctorInjector((int)USER_ID);
+                    }
+
                     $this->set('subscription_id', $id->id);
                     $c_entity = $this->DataSubscriptionPayments->newEntity([
                         'uid'   => Text::uuid(),
@@ -8612,7 +8617,7 @@ class PaymentsController extends AppPluginController{
                         'error' => $error,
                         'status' => 'DONE',
                         'deleted' => 0,
-                        'md_id' => $ent_user->md_id,
+                        'md_id' => $paymentMdId,
                         'payment_type' => 'FULL',
                         'payment_description' => $subscription_type,
                         'main_service' => $main_service,
@@ -8646,11 +8651,11 @@ class PaymentsController extends AppPluginController{
                     }
                 }
     
-                if($subscription_type == 'SUBSCRIPTIONMD' || $subscription_type == 'MDSCHOOLSUBSCRIPTION' || $subscription_type == 'SUBSCRIPTIONMDIVT'){
-                    $injector = $this->SysUsers->find()->where(['SysUsers.id' => USER_ID, 'SysUsers.md_id ' => 0])->first();
-                    if (!empty($injector)){
+                if (stripos($subscription_type, 'MD') !== false) {
+                    $injector = $this->SysUsers->find()->where(['SysUsers.id' => USER_ID, 'SysUsers.md_id' => 0])->first();
+                    if (!empty($injector)) {
                         $this->loadModel('SpaLiveV1.SysUserAdmin');
-                        $md_id = $this->SysUserAdmin->getAssignedDoctorInjector(USER_ID);                
+                        $md_id = $this->SysUserAdmin->getAssignedDoctorInjector((int)USER_ID);
                         $this->SysUsers->updateAll(
                             ['md_id' => $md_id],
                             ['id' => USER_ID]
@@ -8674,7 +8679,7 @@ class PaymentsController extends AppPluginController{
 
                     if (!empty($assignedRep)) {
 
-                        if($subscription_type == 'MDSCHOOLSUBSCRIPTION' || $subscription_type == 'SUBSCRIPTIONMD'){
+                        if($subscription_type == 'MDSCHOOLSUBSCRIPTION' || $subscription_type == 'SUBSCRIPTIONMD' || $subscription_type == 'SUBSCRIPTIONMDFILLERS'){
                             $this->loadModel('SpaLiveV1.DataCourses');
 
                             $school = $this->DataCourses->find()->where([
@@ -8727,7 +8732,7 @@ class PaymentsController extends AppPluginController{
                                 );
                                 $Ghl->updateOpportunityTags($array_ghl);
                             }
-                        } else if($subscription_type == 'SUBSCRIPTIONMDIVT'){
+                        } else if($subscription_type == 'SUBSCRIPTIONMDIVT' || $subscription_type == 'SUBSCRIPTIONMDIVTFILLERS'){
                             $x = $this->pay_sales_rep_schools(USER_ID, $id_payment->id);
                             $service = ucfirst(strtolower($main_service));
                             $this->send_email_sales_team_member(USER_ID, $service, 'MD', 'Full', 7500, $assignedRep);

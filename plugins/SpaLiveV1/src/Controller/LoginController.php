@@ -447,14 +447,10 @@ class LoginController extends AppPluginController{
                 $this->send_email_j_j(USER_ID);
             }else if(USER_TYPE == 'patient'){
                 
-                $patient_md = $this->SysUsers->find()->where(['SysUsers.id' => USER_ID, 'SysUsers.md_id ' => 0])->first();
+                $patient_md = $this->SysUsers->find()->where(['SysUsers.id' => USER_ID, 'SysUsers.md_id' => 0])->first();
                 if (!empty($patient_md)){
                     $this->loadModel('SpaLiveV1.SysUserAdmin');
-                    $md_id = $this->SysUserAdmin->getAssignedDoctor();                
-                    $this->SysUsers->updateAll(
-                        ['md_id' => $md_id],
-                        ['id' => USER_ID]
-                    );
+                    $this->SysUserAdmin->getAssignedDoctorInjector((int)USER_ID);
                 }
                 $this->loadModel("SpaLiveV1.DataModelPatient");
                     $ent_patient = $this->DataModelPatient->find()->where(['DataModelPatient.email' => USER_EMAIL, 'DataModelPatient.status' => 'not assigned', 'DataModelPatient.registered_training_id ' => 0])->first();                            
