@@ -98,10 +98,12 @@ class PromosController extends AppPluginController {
         if($status_basic=="DONE"){
             $treatment = $this->get_treatment("NEUROTOXINS BASIC");
 
-            $treatmets_allowes_provides[] = array(
-                'id'    => $treatment["id"],
-                'title' => $treatment["name"]
-            );
+            if(!empty($treatment) && !empty($treatment["id"]) && !empty($treatment["name"])){
+                $treatmets_allowes_provides[] = array(
+                    'id'    => $treatment["id"],
+                    'title' => $treatment["name"]
+                );
+            }
         } 
 
         $status_advanced = $ServicesHelper->service_status(
@@ -111,10 +113,12 @@ class PromosController extends AppPluginController {
         if($status_advanced=="DONE"){
             $treatment = $this->get_treatment("NEUROTOXINS ADVANCED");
 
-            $treatmets_allowes_provides[] = array(
-                'id'    => $treatment["id"],
-                'title' => $treatment["name"]
-            );
+            if(!empty($treatment) && !empty($treatment["id"]) && !empty($treatment["name"])){
+                $treatmets_allowes_provides[] = array(
+                    'id'    => $treatment["id"],
+                    'title' => $treatment["name"]
+                );
+            }
         } 
 
         $iv_therapy = $Therapy->consult_iv_application($token_response["user"]["user_id"]);   
@@ -122,10 +126,12 @@ class PromosController extends AppPluginController {
         if($iv_therapy=="ACCEPTED"){
             $treatment = $this->get_treatment("IV THERAPY");
 
-            $treatmets_allowes_provides[] = array(
-                'id'    => $treatment["id"],
-                'title' => $treatment["name"]
-            );
+            if(!empty($treatment) && !empty($treatment["id"]) && !empty($treatment["name"])){
+                $treatmets_allowes_provides[] = array(
+                    'id'    => $treatment["id"],
+                    'title' => $treatment["name"]
+                );
+            }
         }
 
         $status = $ServicesHelper->service_status(
@@ -135,10 +141,12 @@ class PromosController extends AppPluginController {
         if($status=="DONE"){
             $treatment = $this->get_treatment("FILLERS");
 
-            $treatmets_allowes_provides[] = array(
-                'id'    => $treatment["id"],
-                'title' => $treatment["name"]
-            );
+            if(!empty($treatment) && !empty($treatment["id"]) && !empty($treatment["name"])){
+                $treatmets_allowes_provides[] = array(
+                    'id'    => $treatment["id"],
+                    'title' => $treatment["name"]
+                );
+            }
         }
 
         $treatments_ot = $this->SysTreatmentsOt->find()->where(['deleted' => 0, 'id NOT IN' => [1,2,3,999]])->all();
@@ -151,10 +159,12 @@ class PromosController extends AppPluginController {
 
             if($status=="DONE"){
                 $treatment = $this->get_treatment($treatment_ot->name_key);
-                $treatmets_allowes_provides[] = array(
-                    'id'    => $treatment["id"],
-                    'title' => $treatment["name"]
-                );
+                if(!empty($treatment) && !empty($treatment["id"]) && !empty($treatment["name"])){
+                    $treatmets_allowes_provides[] = array(
+                        'id'    => $treatment["id"],
+                        'title' => $treatment["name"]
+                    );
+                }
             }
         }
 

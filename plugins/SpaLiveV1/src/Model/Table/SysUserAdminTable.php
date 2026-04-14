@@ -2,8 +2,6 @@
 namespace SpaLiveV1\Model\Table;
 
 use Cake\ORM\Table;
-use Cake\Utility\Hash;
-use Cake\Validation\Validator;
 
 class SysUserAdminTable extends Table
 {
@@ -12,116 +10,182 @@ class SysUserAdminTable extends Table
         $this->setTable('sys_users_admin'); // Name of the table in the database, if absent convention assumes lowercase version of file prefix
 
         $this->addBehavior('SpaLiveV1.My');
-        // $this->addBehavior('Admin.MyTree');
-        // $this->addBehavior('Tree');
         $this->addBehavior('Timestamp'); // Allows your model to timestamp records on creation/modification
     }
 
-    public function getRandomDoctor($injector_id = 0){
-        // Pick among active DOCTOR rows in sys_users_admin, favoring the least-assigned md_id on sys_users (balanced load).
+    /**
+     * All active DOCTOR admin ids (sys_users_admin).
+     *
+     * @return list<int>
+     */
+    private function eligibleDoctorAdminIds(): array
+    {
         $doctorRows = $this->find()
             ->select(['id'])
             ->where(['SysUserAdmin.user_type' => 'DOCTOR', 'SysUserAdmin.deleted' => 0])
             ->enableHydration(false)
             ->toArray();
         $doctorIds = array_map('intval', array_column($doctorRows, 'id'));
-        $doctorIds = array_values(array_filter($doctorIds, static fn ($id) => $id > 0));
+
+        return array_values(array_filter($doctorIds, static fn ($id) => $id > 0));
+    }
+
+    /**
+     * Random pick among all active DOCTORs (uniform; no historical count weighting).
+     *
+     * @return int Admin doctor id, or 0 if none
+     */
+    private function pickRandomEligibleDoctorId(): int
+    {
+        $doctorIds = $this->eligibleDoctorAdminIds();
+        if ($doctorIds === []) {
+            return 0;
+        }
+
+        return (int)$doctorIds[array_rand($doctorIds)];
+    }
+
+    /**
+     * Picks the active DOCTOR with the fewest injectors (type injector / gfe+ci) already assigned.
+     * Ties are broken at random so new signups spread across MDs with the same count (~one-each).
+     *
+     * @return int Admin doctor id, or 0 if none
+     */
+    private function pickLeastLoadedDoctorIdForInjectors(): int
+    {
+        $doctorIds = $this->eligibleDoctorAdminIds();
         if ($doctorIds === []) {
             return 0;
         }
 
         $placeholders = implode(',', array_fill(0, count($doctorIds), '?'));
-        $sql = "SELECT md_id, COUNT(*) AS cnt FROM sys_users WHERE deleted = 0 AND md_id IN ($placeholders) GROUP BY md_id";
+        $sql = "SELECT u.md_id AS md_id, COUNT(*) AS c FROM sys_users u
+            WHERE u.deleted = 0
+              AND u.md_id IN ($placeholders)
+              AND u.type IN ('injector', 'gfe+ci')
+            GROUP BY u.md_id";
         $stmt = $this->getConnection()->execute($sql, $doctorIds);
-        $countsByMd = array_fill_keys($doctorIds, 0);
-        foreach ($stmt->fetchAll('assoc') as $row) {
-            $mid = (int)$row['md_id'];
-            if (isset($countsByMd[$mid])) {
-                $countsByMd[$mid] = (int)$row['cnt'];
+        $countsByMd = [];
+        while ($row = $stmt->fetch('assoc')) {
+            $countsByMd[(int)$row['md_id']] = (int)$row['c'];
+        }
+
+        $minCount = PHP_INT_MAX;
+        foreach ($doctorIds as $docId) {
+            $c = $countsByMd[$docId] ?? 0;
+            if ($c < $minCount) {
+                $minCount = $c;
             }
         }
 
-        $minCount = min($countsByMd);
-        $candidates = array_keys(array_filter($countsByMd, static fn ($c) => $c === $minCount));
+        $candidates = [];
+        foreach ($doctorIds as $docId) {
+            $c = $countsByMd[$docId] ?? 0;
+            if ($c === $minCount) {
+                $candidates[] = $docId;
+            }
+        }
+
         return (int)$candidates[array_rand($candidates)];
     }
 
-
-    public function getAssignedDoctor(){
-        //return 139;
-        $last = $this->getConnection()->query( "SELECT U.md_id FROM sys_users U WHERE U.deleted = 0 and U.md_id !=0 and type <> 'injector' order by id desc limit 1 ")->fetchAll('assoc');        
-        if(isset($last))
-            $last_d =  $last[0]['md_id'];
-        else
-            $last_d =0;
-        
-        if($last_d ==0){
-            $doctors = $this->find()->select(['SysUserAdmin.id'])->where(['SysUserAdmin.user_type' => 'DOCTOR','SysUserAdmin.deleted' => 0])->toArray();
-            $numDocts = sizeof($doctors);
-            $pos = rand(0, ($numDocts - 1));
-            return $doctors[$pos]['id'];
-        }else{            
-            $doctors = $this->find()->select(['SysUserAdmin.id'])->where(['SysUserAdmin.user_type' => 'DOCTOR','SysUserAdmin.deleted' => 0,'SysUserAdmin.id <>' => $last_d])->toArray();
-            $numDocts = sizeof($doctors);
-            $pos = rand(0, ($numDocts - 1));
-            return $doctors[$pos]['id'];
-        }
+    /**
+     * Same rule as getAssignedDoctorInjector for new md_id: least-loaded among active DOCTORs.
+     */
+    public function pickBalancedDoctorIdForNewAssignment(): int
+    {
+        return $this->pickLeastLoadedDoctorIdForInjectors();
     }
 
-    public function getAssignedDoctorInjector($id){    
-        
-        //return 139;
-        $assigned = $this->getConnection()->query( "SELECT U.md_id, U.created FROM sys_users U WHERE U.deleted = 0  and type in ('injector', 'gfe+ci') and U.id = {$id} order by id desc limit 1 ")->fetchAll('assoc');        
-        
-        if(isset($assigned[0])){
-            if(isset($assigned[0]['created'])){      
-                
-                $date1 = new \DateTime('2023-08-12');
-                $date2 = new \DateTime($assigned[0]['created']);                
-                if ($date1 >= $date2) { // created < 2023-08-12
-                    //check gfe //md_id assigned                    
-                    $gfe = $this->getConnection()->query( "select * from data_consultation where patient_id = {$id} and status <> 'CANCEL'  limit 1 ")->fetchAll('assoc');        
-                    if(isset($gfe[0])){// has gfe
-                        $date3 = new \DateTime('2023-08-12');
-                        $date4 = new \DateTime($gfe[0]['schedule_date']);                
-                        if ($date3 >= $date4) { // schedule_date < 2023-08-12
-                            //return $gfe[0]['schedule_date'];
-                            return $assigned[0]['md_id'];
-                        }else{
-                            return $this->getAssignedDoctorByInjector();
-                        }                        
-                    }else{                         
-                        return $this->getAssignedDoctorByInjector();
-                    }
-                } else {// no gfe
-                    return $this->getAssignedDoctorByInjector();                    
-                }
-                
+    /**
+     * When $injector_id > 0, ensures that user has an md_id (persists if missing).
+     * When $injector_id === 0, returns a random doctor id without updating any user row.
+     */
+    public function getRandomDoctor($injector_id = 0): int
+    {
+        $injectorId = (int)$injector_id;
+        if ($injectorId > 0) {
+            return $this->getAssignedDoctorInjector($injectorId);
+        }
+
+        return $this->pickRandomEligibleDoctorId();
+    }
+
+    public function getAssignedDoctor(): int
+    {
+        $last = $this->getConnection()->query(
+            "SELECT U.md_id FROM sys_users U WHERE U.deleted = 0 AND U.md_id != 0 AND type <> 'injector' ORDER BY id DESC LIMIT 1"
+        )->fetchAll('assoc');
+        $last_d = 0;
+        if (!empty($last[0]['md_id'])) {
+            $last_d = (int)$last[0]['md_id'];
+        }
+
+        $baseWhere = [
+            'SysUserAdmin.user_type' => 'DOCTOR',
+            'SysUserAdmin.deleted' => 0,
+        ];
+
+        if ($last_d === 0) {
+            $doctors = $this->find()->select(['SysUserAdmin.id'])
+                ->where($baseWhere)
+                ->toArray();
+            $numDocts = count($doctors);
+            if ($numDocts === 0) {
+                return $this->pickRandomEligibleDoctorId();
             }
+            $pos = rand(0, $numDocts - 1);
 
-        }/*else{
-            return;
-        }*/                        
+            return (int)$doctors[$pos]['id'];
+        }
+
+        $whereAlt = $baseWhere + ['SysUserAdmin.id <>' => $last_d];
+        $doctors = $this->find()->select(['SysUserAdmin.id'])
+            ->where($whereAlt)
+            ->toArray();
+        $numDocts = count($doctors);
+        if ($numDocts === 0) {
+            return $this->pickRandomEligibleDoctorId();
+        }
+        $pos = rand(0, $numDocts - 1);
+
+        return (int)$doctors[$pos]['id'];
     }
 
-    private function getAssignedDoctorByInjector(){
-        //return 139;        
-        $last = $this->getConnection()->query( "SELECT U.md_id FROM sys_users U WHERE U.deleted = 0 and U.md_id !=0 and type in ('injector', 'gfe+ci') order by id desc limit 1 ")->fetchAll('assoc');        
-        if(isset($last))
-            $last_d =  $last[0]['md_id'];
-        else
-            $last_d =0;
-        
-        if($last_d ==0){
-            $doctors = $this->find()->select(['SysUserAdmin.id'])->where(['SysUserAdmin.user_type' => 'DOCTOR','SysUserAdmin.deleted' => 0])->toArray();
-            $numDocts = sizeof($doctors);
-            $pos = rand(0, ($numDocts - 1));
-            return $doctors[$pos]['id'];
-        }else{            
-            $doctors = $this->find()->select(['SysUserAdmin.id'])->where(['SysUserAdmin.user_type' => 'DOCTOR','SysUserAdmin.deleted' => 0,'SysUserAdmin.id <>' => $last_d])->toArray();
-            $numDocts = sizeof($doctors);
-            $pos = rand(0, ($numDocts - 1));
-            return $doctors[$pos]['id'];
+    /**
+     * Returns sys_users.md_id for this user. If zero, assigns least-loaded active DOCTOR (injector load) and persists.
+     *
+     * @param int $id sys_users.id
+     * @return int sys_users_admin id of assigned doctor, or 0 if user missing or no doctors available
+     */
+    public function getAssignedDoctorInjector(int $id): int
+    {
+        $id = (int)$id;
+        if ($id <= 0) {
+            return 0;
         }
+
+        $stmt = $this->getConnection()->execute(
+            'SELECT id, md_id FROM sys_users WHERE id = ? AND deleted = 0 LIMIT 1',
+            [$id]
+        );
+        $row = $stmt->fetch('assoc');
+        if ($row === false) {
+            return 0;
+        }
+
+        $mdId = (int)$row['md_id'];
+        if ($mdId > 0) {
+            return $mdId;
+        }
+
+        $newMd = $this->pickLeastLoadedDoctorIdForInjectors();
+        if ($newMd <= 0) {
+            return 0;
+        }
+
+        $this->getConnection()->update('sys_users', ['md_id' => $newMd], ['id' => $id, 'deleted' => 0]);
+
+        return $newMd;
     }
 }

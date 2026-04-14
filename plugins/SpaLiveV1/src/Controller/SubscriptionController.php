@@ -664,17 +664,8 @@ class SubscriptionController extends AppPluginController {
 
         if ($addPayment && $addPayment !== '0' && $addPayment !== false) {
             // Same as insert_subscription_by_values / save_subscription after Stripe: assign MD when missing
-            if ($subscriptionType === 'SUBSCRIPTIONMD' || $subscriptionType === 'SUBSCRIPTIONMDIVT' || $subscriptionType === 'SUBSCRIPTIONMDFILLERS') {
-                $injector = $this->SysUsers->find()
-                    ->where(['SysUsers.id' => $userId, 'SysUsers.md_id' => 0])
-                    ->first();
-                if (!empty($injector)) {
-                    $mdAssigned = $this->SysUserAdmin->getAssignedDoctorInjector($userId);
-                    $this->SysUsers->updateAll(
-                        ['md_id' => $mdAssigned],
-                        ['id' => $userId]
-                    );
-                }
+            if (stripos($subscriptionType, 'MD') !== false) {
+                $this->SysUserAdmin->getAssignedDoctorInjector((int)$userId);
             }
 
             $userFresh = $this->SysUsers->get($userId);
@@ -1159,16 +1150,9 @@ class SubscriptionController extends AppPluginController {
             $this->set('subscription_id', $sub->id);
             $this->set('update_agreement', true);
 
-            if($subscription_type == 'SUBSCRIPTIONMD'||$subscription_type == 'SUBSCRIPTIONMDIVT'||$subscription_type == 'SUBSCRIPTIONMDIVT'||$subscription_type == 'SUBSCRIPTIONMSLIVT'){
-                $injector = $this->SysUsers->find()->where(['SysUsers.id' => USER_ID, 'SysUsers.md_id ' => 0])->first();
-                if (!empty($injector)){
-                    $this->loadModel('SpaLiveV1.SysUserAdmin');
-                    $md_id = $this->SysUserAdmin->getAssignedDoctorInjector(USER_ID);
-                    $this->SysUsers->updateAll(
-                        ['md_id' => $md_id],
-                        ['id' => USER_ID]
-                    );
-                }
+            if (stripos($subscription_type, 'MD') !== false || $subscription_type == 'SUBSCRIPTIONMSLIVT') {
+                $this->loadModel('SpaLiveV1.SysUserAdmin');
+                $this->SysUserAdmin->getAssignedDoctorInjector((int)USER_ID);
 
                 if($subscription_type == 'SUBSCRIPTIONMD'){
                     if(!env('IS_DEV', false)){
@@ -4469,16 +4453,9 @@ class SubscriptionController extends AppPluginController {
                 }
             }
 
-            if($subscription_type == 'SUBSCRIPTIONMD'||$subscription_type == 'SUBSCRIPTIONMDIVT'){
-                $injector = $this->SysUsers->find()->where(['SysUsers.id' => $ent_user->id, 'SysUsers.md_id ' => 0])->first();
-                if (!empty($injector)){
-                    $this->loadModel('SpaLiveV1.SysUserAdmin');
-                    $md_id = $this->SysUserAdmin->getAssignedDoctorInjector($ent_user->id);                
-                    $this->SysUsers->updateAll(
-                        ['md_id' => $md_id],
-                        ['id' => $ent_user->id]
-                    );
-                }
+            if (stripos($subscription_type, 'MD') !== false) {
+                $this->loadModel('SpaLiveV1.SysUserAdmin');
+                $this->SysUserAdmin->getAssignedDoctorInjector((int)$ent_user->id);
 
                 #region Pay comission to sales representative
                 $this->loadModel('SpaLiveV1.DataAssignedToRegister');
@@ -7732,18 +7709,14 @@ class SubscriptionController extends AppPluginController {
         $this->loadModel('SpaLiveV1.SysUserAdmin');
 
         $ent_user = $this->SysUsers->find()->where(['SysUsers.id' => $user_id])->first();
-        $md_id = $ent_user->md_id;
-        if($md_id == 0){
-            $md_id = $this->SysUserAdmin->getAssignedDoctorInjector($user_id);                
-            $this->SysUsers->updateAll(
-                ['md_id' => $md_id],
-                ['id' => $user_id]
-            );            
+        $md_id = (int)$ent_user->md_id;
+        if ($md_id === 0) {
+            $md_id = $this->SysUserAdmin->getAssignedDoctorInjector((int)$user_id);
         }
 
-        $ent_medical_director = $this->SysUserAdmin->find()->where(['SysUserAdmin.id' => $md_id])->first();        
+        $ent_medical_director = $this->SysUserAdmin->find()->where(['SysUserAdmin.id' => $md_id])->first();
 
-        return $ent_medical_director->name;
+        return $ent_medical_director !== null ? $ent_medical_director->name : '';
     }
 
     public function get_total_subscription(
@@ -12690,8 +12663,6 @@ if (isset($arr_subscriptions['membership_msl_iv'])) {
             $receipt_url = '';
             $id_charge = '';
             $payment_id = '';
-            $this->loadModel('SpaLiveV1.SysUserAdmin');
-            $md_id = $this->SysUserAdmin->getAssignedDoctorInjector($user_id);
 
             if(isset($stripe_result->charges->data[0]->receipt_url)) {
                 $receipt_url = $stripe_result->charges->data[0]->receipt_url;
@@ -12701,6 +12672,9 @@ if (isset($arr_subscriptions['membership_msl_iv'])) {
             }
 
             if(empty($error) && $stripe_result->status == 'succeeded') {
+                $this->loadModel('SpaLiveV1.SysUserAdmin');
+                $md_id = $this->SysUserAdmin->getAssignedDoctorInjector((int)$user_id);
+
                 $this->loadModel('SpaLiveV1.DataSubscriptionPayments');
 
                 $array_save = array(
@@ -12918,8 +12892,6 @@ if (isset($arr_subscriptions['membership_msl_iv'])) {
             $receipt_url = '';
             $id_charge = '';
             $payment_id = '';
-            $this->loadModel('SpaLiveV1.SysUserAdmin');
-            $md_id = $this->SysUserAdmin->getAssignedDoctorInjector($user_id);
 
             if(isset($stripe_result->charges->data[0]->receipt_url)) {
                 $receipt_url = $stripe_result->charges->data[0]->receipt_url;
@@ -12929,6 +12901,9 @@ if (isset($arr_subscriptions['membership_msl_iv'])) {
             }
 
             if(empty($error) && $stripe_result->status == 'succeeded') {
+                $this->loadModel('SpaLiveV1.SysUserAdmin');
+                $md_id = $this->SysUserAdmin->getAssignedDoctorInjector((int)$user_id);
+
                 $this->loadModel('SpaLiveV1.DataSubscriptionPayments');
 
                 $array_save = array(
@@ -13054,8 +13029,6 @@ if (isset($arr_subscriptions['membership_msl_iv'])) {
         $receipt_url = '';
         $id_charge = '';
         $payment_id = '';
-        $this->loadModel('SpaLiveV1.SysUserAdmin');
-        $md_id = $this->SysUserAdmin->getAssignedDoctorInjector($user_id);
 
         if(isset($stripe_result->charges->data[0]->receipt_url)) {
             $receipt_url = $stripe_result->charges->data[0]->receipt_url;
@@ -13065,6 +13038,9 @@ if (isset($arr_subscriptions['membership_msl_iv'])) {
         }
 
         if(empty($error) && $stripe_result->status == 'succeeded') {
+
+            $this->loadModel('SpaLiveV1.SysUserAdmin');
+            $md_id = $this->SysUserAdmin->getAssignedDoctorInjector((int)$user_id);
 
             $this->loadModel('SpaLiveV1.DataSubscriptions');
             $this->loadModel('SpaLiveV1.DataSubscriptionPayments');

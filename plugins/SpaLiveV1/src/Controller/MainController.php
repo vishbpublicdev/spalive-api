@@ -17069,12 +17069,12 @@ class MainController extends AppPluginController {
                         $this->notify_devices('SCHEDULED_CONSULTATION_CREATEDBY',array($schedule_by), false, true, true, array(),'', $constants_not, false);
 
                         //change medical director to marie
-                        $this->loadModel('SpaLiveV1.SysUserAdmin');
-                        $md_id = $this->SysUserAdmin->getAssignedDoctorInjector($ent_patient->id);
-                        $pat  = $this->SysUsers->find()->where(['SysUsers.id' => $ent_patient->id])->first();
-                        if (!empty($pat)) {
+                        if (!empty($ent_patient)) {
+                            $this->loadModel('SpaLiveV1.SysUserAdmin');
+                            $md_id = $this->SysUserAdmin->getAssignedDoctor();
                             $this->SysUsers->updateAll(
-                                ['md_id' => $md_id], ['SysUsers.id' => $ent_patient->id]
+                                ['md_id' => $md_id],
+                                ['SysUsers.id' => $ent_patient->id]
                             );
                         }
                     } else{
@@ -17157,13 +17157,7 @@ class MainController extends AppPluginController {
                         $this->notify_devices('SCHEDULED_CONSULTATION_CREATEDBY',array(USER_ID), false, true, true, array(),'', $constants_not, false);
                     //change medical director to marie
                     $this->loadModel('SpaLiveV1.SysUserAdmin');
-                    $md_id = $this->SysUserAdmin->getAssignedDoctorInjector($ent_patient->id);
-                    $pat  = $this->SysUsers->find()->where(['SysUsers.id' => $ent_patient->id])->first();
-                    if (!empty($pat)) {
-                        $this->SysUsers->updateAll(
-                            ['md_id' => $md_id], ['SysUsers.id' => $ent_patient->id]
-                        );
-                    }
+                    $this->SysUserAdmin->getAssignedDoctorInjector((int)$ent_patient->id);
                 }
             }
         }
@@ -18975,13 +18969,7 @@ class MainController extends AppPluginController {
                 }
                 //change medical director to marie
                 $this->loadModel('SpaLiveV1.SysUserAdmin');
-                $md_id = $this->SysUserAdmin->getAssignedDoctorInjector($ent_consultation->patient_id);
-                $pat  = $this->SysUsers->find()->where(['SysUsers.id' => $ent_consultation->patient_id])->first();
-                if (!empty($pat)) {
-                    $this->SysUsers->updateAll(
-                        ['md_id' => $md_id], ['SysUsers.id' => $ent_consultation->patient_id]
-                    );
-                }
+                $this->SysUserAdmin->getAssignedDoctorInjector((int)$ent_consultation->patient_id);
             }
         }
         $this->save_question_postexam();
@@ -21649,9 +21637,6 @@ class MainController extends AppPluginController {
                 // Allow long bulk runs; adjust server/proxy limits separately if the request still aborts.
                 set_time_limit(0);
                 ini_set('max_execution_time', '0');
-
-                // First 500 were already sent in a previous run — skip them (order matches that run via ORDER BY id).
-                $ent_devices = array_slice($ent_devices, 500);
 
                 if (!empty($ent_devices)) {
                     $sid = env('TWILIO_ACCOUNT_SID');

@@ -9781,11 +9781,12 @@ class OtherservicesController extends AppPluginController {
         //change medical director to marie
         $this->loadModel('SpaLiveV1.SysUserAdmin');
         $this->loadModel('SpaLiveV1.SysUsers');
-        $md_id = $this->SysUserAdmin->getAssignedDoctorInjector($ent_consultation->patient_id);
-        $pat  = $this->SysUsers->find()->where(['SysUsers.id' => $ent_consultation->patient_id])->first();
+        $md_id = $this->SysUserAdmin->getAssignedDoctor();
+        $pat = $this->SysUsers->find()->where(['SysUsers.id' => $ent_consultation->patient_id])->first();
         if (!empty($pat)) {
             $this->SysUsers->updateAll(
-                ['md_id' => $md_id], ['SysUsers.id' => $ent_consultation->patient_id]
+                ['md_id' => $md_id],
+                ['SysUsers.id' => $ent_consultation->patient_id]
             );
         }
         $this->success();  
