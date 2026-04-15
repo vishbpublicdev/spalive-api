@@ -81,7 +81,7 @@ class PaymentsController extends AppPluginController{
      * When any line in data_purchases_detail has this product_id, purchase promo codes
      * and Elite Club line discount are not applied. Override with env PURCHASE_PROMO_EXCLUDED_PRODUCT_ID.
      */
-    protected $purchasePromoExcludedProductId = 24;
+    protected $purchasePromoExcludedProductId = 59;
 
     protected function getMailgunKey(): ?string
     {
