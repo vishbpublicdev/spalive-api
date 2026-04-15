@@ -81,7 +81,7 @@ class PaymentsController extends AppPluginController{
      * When any line in data_purchases_detail has this product_id, purchase promo codes
      * and Elite Club line discount are not applied. Override with env PURCHASE_PROMO_EXCLUDED_PRODUCT_ID.
      */
-    protected $purchasePromoExcludedProductId = 24;
+    protected $purchasePromoExcludedProductId = 59;
 
     protected function getMailgunKey(): ?string
     {
@@ -692,7 +692,8 @@ class PaymentsController extends AppPluginController{
         $promo_code = strtoupper(get('promo_code',''));
         $promo_discount = $this->validateCodeMultiplier($promo_code,$type,$subtotal);
 
-        if($promo_discount == 0) {
+        // AMOUNT promos store equivalent percent in getParams('discount'); small fixed amounts round to 0%.
+        if ($promo_discount == 0 && !$this->getParams('code_valid')) {
             $promo_code = '';
         }
 
@@ -4783,7 +4784,7 @@ class PaymentsController extends AppPluginController{
         $promo_code = strtoupper(get('promo_code',''));
         $promo_discount = $this->validateCodeMultiplier($promo_code,$type,$subtotal);
 
-        if($promo_discount != 0) {
+        if ($promo_discount != 0 || $this->getParams('code_valid')) {
             $promo_code = strtoupper(get('promo_code',''));
         } else {
             $promo_code = '';
