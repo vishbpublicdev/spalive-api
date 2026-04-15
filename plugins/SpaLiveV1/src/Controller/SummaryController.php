@@ -189,6 +189,9 @@ class SummaryController extends AppPluginController{
         //treatments controller para separar los tratamientos
         $Treatments = new TreatmentsController();
             
+        $phones = $this->emergencyPhoneOverrideForInjectorMd176($user);
+        $this->emergencyPhone = $phones['emergencyPhone'];
+        $this->emergencyPhone2 = $phones['emergencyPhone2'];
         $this->set('emergencyPhone', $this->emergencyPhone);
         $patient_consent = false;
         $patient_consent_iv_therapy = false;
@@ -2385,6 +2388,9 @@ class SummaryController extends AppPluginController{
 
         $Treatments = new TreatmentsController();
 
+        $phones = $this->emergencyPhoneOverrideForInjectorMd176($user);
+        $this->emergencyPhone = $phones['emergencyPhone'];
+        $this->emergencyPhone2 = $phones['emergencyPhone2'];
         $this->set('emergencyPhone', $this->emergencyPhone);
         $this->set('emergencyPhone2', $this->emergencyPhone2);
 
@@ -6363,6 +6369,9 @@ class SummaryController extends AppPluginController{
 
         ////NTsts
 
+        $phones = $this->emergencyPhoneOverrideForInjectorMd176($user);
+        $this->emergencyPhone = $phones['emergencyPhone'];
+        $this->emergencyPhone2 = $phones['emergencyPhone2'];
         $this->set('emergencyPhone', $this->emergencyPhone);
         // $this->set('emergencyPhone2', $this->emergencyPhone);
 

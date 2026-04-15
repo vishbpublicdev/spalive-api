@@ -9818,8 +9818,10 @@ class MainController extends AppPluginController {
             return;
         }
 
+        $phones = $this->emergencyPhoneOverrideForInjectorMd176($user);
+        $this->emergencyPhone = $phones['emergencyPhone'];
         $this->set('emergencyPhone', $this->emergencyPhone);
-
+        $this->set('emergencyPhone2', $phones['emergencyPhone2']);
 
         $userType = $user['user_role'];
         $this->loadModel('SpaLiveV1.DataMessages');
