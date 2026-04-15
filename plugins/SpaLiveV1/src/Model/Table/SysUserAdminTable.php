@@ -46,55 +46,11 @@ class SysUserAdminTable extends Table
     }
 
     /**
-     * Picks the active DOCTOR with the fewest injectors (type injector / gfe+ci) already assigned.
-     * Ties are broken at random so new signups spread across MDs with the same count (~one-each).
-     *
-     * @return int Admin doctor id, or 0 if none
-     */
-    private function pickLeastLoadedDoctorIdForInjectors(): int
-    {
-        $doctorIds = $this->eligibleDoctorAdminIds();
-        if ($doctorIds === []) {
-            return 0;
-        }
-
-        $placeholders = implode(',', array_fill(0, count($doctorIds), '?'));
-        $sql = "SELECT u.md_id AS md_id, COUNT(*) AS c FROM sys_users u
-            WHERE u.deleted = 0
-              AND u.md_id IN ($placeholders)
-              AND u.type IN ('injector', 'gfe+ci')
-            GROUP BY u.md_id";
-        $stmt = $this->getConnection()->execute($sql, $doctorIds);
-        $countsByMd = [];
-        while ($row = $stmt->fetch('assoc')) {
-            $countsByMd[(int)$row['md_id']] = (int)$row['c'];
-        }
-
-        $minCount = PHP_INT_MAX;
-        foreach ($doctorIds as $docId) {
-            $c = $countsByMd[$docId] ?? 0;
-            if ($c < $minCount) {
-                $minCount = $c;
-            }
-        }
-
-        $candidates = [];
-        foreach ($doctorIds as $docId) {
-            $c = $countsByMd[$docId] ?? 0;
-            if ($c === $minCount) {
-                $candidates[] = $docId;
-            }
-        }
-
-        return (int)$candidates[array_rand($candidates)];
-    }
-
-    /**
-     * Same rule as getAssignedDoctorInjector for new md_id: least-loaded among active DOCTORs.
+     * Random active DOCTOR id for new injector md_id assignments (same distribution as getAssignedDoctorInjector).
      */
     public function pickBalancedDoctorIdForNewAssignment(): int
     {
-        return $this->pickLeastLoadedDoctorIdForInjectors();
+        return $this->pickRandomEligibleDoctorId();
     }
 
     /**
@@ -153,7 +109,8 @@ class SysUserAdminTable extends Table
     }
 
     /**
-     * Returns sys_users.md_id for this user. If zero, assigns least-loaded active DOCTOR (injector load) and persists.
+     * Returns sys_users.md_id for this user. If zero, assigns a random active DOCTOR, persists to sys_users, and returns it.
+     * Used for injectors (e.g. treatments: same value as data_treatment.assigned_doctor via getRandomDoctor).
      *
      * @param int $id sys_users.id
      * @return int sys_users_admin id of assigned doctor, or 0 if user missing or no doctors available
@@ -179,13 +136,26 @@ class SysUserAdminTable extends Table
             return $mdId;
         }
 
-        $newMd = $this->pickLeastLoadedDoctorIdForInjectors();
+        $newMd = $this->pickRandomEligibleDoctorId();
         if ($newMd <= 0) {
             return 0;
         }
 
-        $this->getConnection()->update('sys_users', ['md_id' => $newMd], ['id' => $id, 'deleted' => 0]);
+        // Only set when still unassigned (avoids overwriting a concurrent assignment).
+        $upd = $this->getConnection()->execute(
+            'UPDATE sys_users SET md_id = ? WHERE id = ? AND deleted = 0 AND IFNULL(md_id, 0) = 0',
+            [$newMd, $id]
+        );
+        if ($upd->rowCount() > 0) {
+            return $newMd;
+        }
 
-        return $newMd;
+        $stmt = $this->getConnection()->execute(
+            'SELECT md_id FROM sys_users WHERE id = ? AND deleted = 0 LIMIT 1',
+            [$id]
+        );
+        $rowAfter = $stmt->fetch('assoc');
+
+        return $rowAfter === false ? 0 : (int)$rowAfter['md_id'];
     }
 }
