@@ -114,6 +114,21 @@ class PaymentsController extends AppPluginController{
         return false;
     }
 
+    /**
+     * Merchandise subtotal in cents from purchase line items.
+     * Uses header purchase amount only when details are missing or sum to zero (legacy rows).
+     */
+    private function purchaseMerchandiseSubtotalForPromo($purchaseDetails, $headerAmountCents): int
+    {
+        $sum = 0;
+        foreach ($purchaseDetails as $row) {
+            $price = is_array($row) ? (int)($row['price'] ?? 0) : (int)$row->price;
+            $qty = is_array($row) ? (int)($row['qty'] ?? 0) : (int)$row->qty;
+            $sum += $price * $qty;
+        }
+        return $sum > 0 ? $sum : (int)$headerAmountCents;
+    }
+
 	public function initialize() : void{
         parent::initialize();
         date_default_timezone_set("America/Chicago");
@@ -495,6 +510,8 @@ class PaymentsController extends AppPluginController{
         $isSingleCoursePurchase = (count($_ent_purchases) === 1
             && in_array($type_purchase, ['TRAINING', 'LEVEL3', 'FILLERS', 'TOXTUNEUP'], true));
 
+        $purchaseAmountForPromo = $this->purchaseMerchandiseSubtotalForPromo($_ent_purchases, $ent_purchase->amount);
+
         $code = strtoupper(trim(get('promo_code', '')));
         $this->loadModel('SpaLiveV1.DataCodeEc');
         $ent_promo = $this->DataCodeEc->find()->last();
@@ -502,7 +519,7 @@ class PaymentsController extends AppPluginController{
         $total_amount = 0;
         $skipPurchasePromo = $this->purchaseContainsPromoExcludedProduct($_ent_purchases);
         if ($skipPurchasePromo) {
-            $total_amount = $this->validateCode('', ($ent_purchase->amount), $type_purchase) + $ent_purchase->shipping_cost;
+            $total_amount = $this->validateCode('', $purchaseAmountForPromo, $type_purchase) + $ent_purchase->shipping_cost;
         } elseif(!empty($ent_promo)){
             if($ent_promo->code == $code){
                 $this->loadModel('SpaLiveV1.DataEliteClub');
@@ -563,13 +580,13 @@ class PaymentsController extends AppPluginController{
                     
                 }
                 else{
-                    $total_amount = $this->validateCode($code,($ent_purchase->amount),$type_purchase) + $ent_purchase->shipping_cost;
+                    $total_amount = $this->validateCode($code, $purchaseAmountForPromo, $type_purchase) + $ent_purchase->shipping_cost;
                 }
             }else{
-                $total_amount = $this->validateCode($code,($ent_purchase->amount),$type_purchase) + $ent_purchase->shipping_cost;
+                $total_amount = $this->validateCode($code, $purchaseAmountForPromo, $type_purchase) + $ent_purchase->shipping_cost;
             }
         }else{
-            $total_amount = $this->validateCode($code,($ent_purchase->amount),$type_purchase) + $ent_purchase->shipping_cost;
+            $total_amount = $this->validateCode($code, $purchaseAmountForPromo, $type_purchase) + $ent_purchase->shipping_cost;
         }
 
 
@@ -3858,10 +3875,12 @@ class PaymentsController extends AppPluginController{
         $this->loadModel('SpaLiveV1.DataCodeEc');
         $ent_promo = $this->DataCodeEc->find()->last();
 
+        $purchaseAmountForPromo = $this->purchaseMerchandiseSubtotalForPromo($_ent_purchases, $ent_purchase->amount);
+
         $total_amount = 0;
         $skipPurchasePromo = $this->purchaseContainsPromoExcludedProduct($_ent_purchases);
         if ($skipPurchasePromo) {
-            $total_amount = $this->validateCode('', ($ent_purchase->amount), $type_purchase) + $ent_purchase->shipping_cost;
+            $total_amount = $this->validateCode('', $purchaseAmountForPromo, $type_purchase) + $ent_purchase->shipping_cost;
         } elseif(!empty($ent_promo)){
             if($ent_promo->code == $code){
                 $this->loadModel('SpaLiveV1.DataEliteClub');
@@ -3880,13 +3899,13 @@ class PaymentsController extends AppPluginController{
                     $total_amount = intval($total_amount + $ent_purchase->shipping_cost + $stripe_fee);
                 }
                 else{
-                    $total_amount = $this->validateCode($code,($ent_purchase->amount),$type_purchase) + $ent_purchase->shipping_cost;
+                    $total_amount = $this->validateCode($code, $purchaseAmountForPromo, $type_purchase) + $ent_purchase->shipping_cost;
                 }
             }else{
-                $total_amount = $this->validateCode($code,($ent_purchase->amount),$type_purchase) + $ent_purchase->shipping_cost;
+                $total_amount = $this->validateCode($code, $purchaseAmountForPromo, $type_purchase) + $ent_purchase->shipping_cost;
             }
         }else{
-            $total_amount = $this->validateCode($code,($ent_purchase->amount),$type_purchase) + $ent_purchase->shipping_cost;
+            $total_amount = $this->validateCode($code, $purchaseAmountForPromo, $type_purchase) + $ent_purchase->shipping_cost;
         }
 
         if ($total_amount < 100) $total_amount = 100;
