@@ -20249,6 +20249,9 @@ class MainController extends AppPluginController {
         // Single training/course line: no Stripe pass-through fee (shop/certifications course purchase).
         $singleTrainingCheckout = ($is_training && count($arr_products) <= 1);
 
+        // Elite lines accumulate in $total_elite; others in $grand_total. Persist full merchandise subtotal.
+        $merchandise_amount = $grand_total + $total_elite;
+
         $purchase_uid = Text::uuid();
         $array_save = array(
             'uid' => $purchase_uid,
@@ -20265,7 +20268,7 @@ class MainController extends AppPluginController {
             'created' => date('Y-m-d H:i:s'),
             'shipping_date' => date('Y-m-d'),
             'shipping_cost' => $shipping_cost,
-            'amount' => $grand_total,
+            'amount' => $merchandise_amount,
         );
 
         $c_entity = $this->DataPurchases->newEntity($array_save);
@@ -32446,8 +32449,6 @@ class MainController extends AppPluginController {
             $ddate = empty($ent->created) ? '' : $ent->created->i18nFormat('MM/dd/yyyy');
             $img_html = $ent->file_id > 0 ? '<img src="' . $this->URL_API . '?key=2fe548d5ae881ccfbe2be3f6237d7951&l3n4p=6092482f7ce858.91169218&action=get-file&token=6092482f7ce858.91169218&id=' . $ent->file_id . '" style="height:100; width:100;">' : '';
             $content = $ent->content;
-            // Remove ALL img tags - external URLs and get-file URLs often fail when HTML2PDF fetches them server-side
-            $content = preg_replace('/<img[^>]*>/i', '', $content);
             // Simplify external links to plain text (links can cause issues in HTML2PDF)
             $content = preg_replace('/<a\s+[^>]*href=["\']https?:\/\/[^"\']*["\'][^>]*>([^<]*)<\/a>/i', '$1', $content);
             $content = str_replace('210mm;', '190mm;', $content);
@@ -32469,8 +32470,6 @@ class MainController extends AppPluginController {
             }else{
                 $content = str_replace('[patient_block]', $patient_block, $content);
             }
-            // Final pass: remove any remaining img tags (including patient signature) that can cause HTML2PDF to fail
-            $content = preg_replace('/<img[^>]*>/i', '', $content);
             // Repair malformed HTML - DOMDocument auto-closes unclosed tags
             $content = $this->_repairHtmlForPdf($content);
         } else {
