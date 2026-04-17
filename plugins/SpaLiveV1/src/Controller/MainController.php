@@ -1631,14 +1631,34 @@ class MainController extends AppPluginController {
             ->group(['SysUsers.email'])
             ->toArray();
         } else if ($type == 'PENDING PAYMENT INJECTORS') {
-            if(count($SU)>0){
-                $where = ['SysUsers.deleted' => 0, 'SysUsers.login_status' => 'PAYMENT','SysUsers.type' => 'injector','SysUsers.active' => 1, $field_valid,$SU] ;
-            }else{
-                $where = ['SysUsers.deleted' => 0, 'SysUsers.login_status' => 'PAYMENT','SysUsers.type' => 'injector','SysUsers.active' => 1, $field_valid] ;
-            } 
+            // Injectors with no qualifying course purchase in data_payment (panel label unchanged).
+            $injectorCoursePurchaseTypes = [
+                'BASIC COURSE',
+                'ADVANCED COURSE',
+                'ADVANCED TECHNIQUES MEDICAL',
+                'FILLERS COURSE',
+                'LEVEL 1-1 NEUROTOXINS',
+                'DERMAPLANING',
+                'MICRONEEDLING',
+                'PEEL',
+                'CHEMICAL_PEELS',
+                'CI REGISTER',
+                'REGISTER',
+                'COURSEMSL',
+                'OTHERCOURSE',
+                'OTHER_COURSE',
+            ];
+            $courseTypeInList = "'" . implode("','", $injectorCoursePurchaseTypes) . "'";
+            $notExistsCoursePaymentSql = 'NOT EXISTS (SELECT 1 FROM data_payment dp WHERE dp.id_from = SysUsers.id AND dp.id_to = 0 AND dp.payment <> \'\' AND dp.is_visible = 1 AND dp.refund_id = 0 AND dp.type IN (' . $courseTypeInList . '))';
+            if (count($SU) > 0) {
+                $where = ['SysUsers.deleted' => 0, 'SysUsers.type' => 'injector', 'SysUsers.active' => 1, $field_valid, $SU];
+            } else {
+                $where = ['SysUsers.deleted' => 0, 'SysUsers.type' => 'injector', 'SysUsers.active' => 1, $field_valid];
+            }
             $ent_user = $this->SysUsers->find()
             ->join(['DNS' => ['table' => 'data_notifications_settings', 'type' => 'LEFT', 'conditions' => 'DNS.user_id = SysUsers.id']])
             ->where($where)
+            ->where($notExistsCoursePaymentSql)
             ->group(['SysUsers.email'])
             ->toArray();
         } else if($type == 'INJECTOR BOOKED BASIC TRAINING'){
