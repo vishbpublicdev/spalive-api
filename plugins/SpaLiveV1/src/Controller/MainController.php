@@ -23433,18 +23433,19 @@ class MainController extends AppPluginController {
             ->where(['DataPayment.id_from' => USER_ID, 'DataPayment.id_to' => 0,'DataPayment.type' => "ADVANCED COURSE", 
                 'DataPayment.payment <>' => '', 'DataPayment.is_visible' => 1,'DataPayment.refund_id' => 0])->first();
 
-        $shop_level_medical = empty($payment_medical) ? false : true;
+        $payment = $this->DataPayment->find()
+            ->where(['DataPayment.id_from' => $user["user_id"], 'DataPayment.id_to' => 0,'DataPayment.type' => "ADVANCED TECHNIQUES MEDICAL", 
+                'DataPayment.service_uid' => '','DataPayment.payment <>' => '', 'DataPayment.is_visible' => 1, 'DataPayment.refund_id' => 0])->first();
+
+        // Show Level 3 block if user completed Level 2 purchase (ADVANCED COURSE) or already owns Level 3 medical (single-payment / dev data).
+        $shop_level_medical = !empty($payment_medical) || !empty($payment);
 
         $tr_result = array();
 
         if(!empty($shop_level_medical)){
             $purchased = false;
             $show_buy_button_level_3_medical = false;
-            $this->loadModel('SpaLiveV1.DataPayment');
-            $payment = $this->DataPayment->find()
-                ->where(['DataPayment.id_from' => $user["user_id"], 'DataPayment.id_to' => 0,'DataPayment.type' => "ADVANCED TECHNIQUES MEDICAL", 
-                    'DataPayment.service_uid' => '','DataPayment.payment <>' => '', 'DataPayment.is_visible' => 1, 'DataPayment.refund_id' => 0])->first();
-            
+
             if(!empty($payment)){
                 $purchased =  true;
 

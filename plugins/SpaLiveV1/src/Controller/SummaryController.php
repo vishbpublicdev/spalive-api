@@ -4048,7 +4048,30 @@ class SummaryController extends AppPluginController{
             'DPD' => ['table' => 'data_purchases_detail', 'type' => 'INNER', 'conditions' => 'DPD.purchase_id = DataPurchases.id'],
             'CP' => ['table' => 'cat_products', 'type' => 'INNER', 'conditions' => 'CP.id = DPD.product_id'],
         ])
-        ->where(['DataPurchases.user_id' => USER_ID, 'DataPurchases.deleted' => 0, 'DataPurchases.payment <>' => '', 'CP.deleted' => 0, 'CP.category IN' => array('NEUROTOXIN PACKAGES', 'FILLERS', 'IV VIALS', 'NEUROTOXINS', 'SKIN PRODUCTS')])->first();
+        ->where([
+            'DataPurchases.user_id' => USER_ID,
+            'DataPurchases.deleted' => 0,
+            'DataPurchases.payment <>' => '',
+            'CP.deleted' => 0,
+            'CP.category IN' => [
+                'NEUROTOXINS',
+                'FILLERS',
+                'FLIP',
+                'LIFT',
+                'NEUROTOXIN PACKAGES',
+                'FILLER PACKAGES',
+                'HYDRATE',
+                'ENERGIZE',
+                'WELLNESS',
+                'IV VIALS',
+                'SKIN PRODUCTS',
+                'ACNE PRODUCTS',
+                'BRIGHTENING PRODUCTS',
+                'ANTI-AGING PRODUCTS',
+                'BACKBAR PRODUCTS',
+                'SKIN KITS',
+            ],
+        ])->first();
 
         $this->set('button_patients', !empty($purchase) ? true : false);
 
