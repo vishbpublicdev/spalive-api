@@ -2825,7 +2825,7 @@ class CourseController extends AppPluginController {
             // if (count($ent_training) > 0 && $advanced == 'BUY')  {
                 if($advanced == 'BUY' || $advanced == 'BOOK'){
                     $arr_other_courses_list[] = [
-                        'title' => 'NEUROTOXINS ADVANCED',
+                        'title' => 'Neurotoxin Course - Level 2',
                         'status' => $advanced,
                         'type' => 'ADVANCED',
                         'course_type_id' => 0
