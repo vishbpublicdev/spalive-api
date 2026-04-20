@@ -4388,7 +4388,7 @@ class LoginController extends AppPluginController{
         $deferred_offer_id = isset($Partially->deferred_offers['advanced']) && !empty($Partially->deferred_offers['advanced']) ? $Partially->deferred_offers['advanced'] : null;
         $this->set('installments_deferred', !empty($deferred_offer_id) ? true : false);
 
-        $this->set('title_option', 'Level Two Advanced Botulinum Toxin Techniques: Enhancing Lips, Brows, and Chin $' . $training_amount);
+        $this->set('title_option', 'Neurotoxin Course - Level 2 $' . $training_amount);
         $this->set('training_amount', $training_amount);
         $this->set('training_amount_installments', number_format($instNotCrossCents / 100, 2, '.', ''));
         $this->set('stripe_fee', number_format($stripe_fee, 2, '.', ''));
@@ -4396,25 +4396,12 @@ class LoginController extends AppPluginController{
         $this->set('image', 'https://blog.myspalive.com/wp-content/uploads/2022/06/imagen_2022-06-16_135810439.png');
         $this->set('text', '
             <h3>Course Description:</h3>
-            <p>Elevate your aesthetic practice with our Level 2 half-day workshop, designed for practitioners ready to advance their expertise in botulinum toxin applications. This next-level course focuses on sophisticated injection techniques for lip enhancement (Lip Flip), brow lifting, and chin treatments, integrating both theory and practical skills.</p>
-            
-            <h3>Morning Session: Advanced Theoretical Framework</h3>
-            <ul>
-                <li>Start with a recap of essential principles from Level One, setting a strong foundation.</li>
-                <li>Delve into advanced treatment areas, including the Lip Flip, a three-point brow lift, and enhancements to the chin and DAO area, highlighting the latest strategies and additional units for optimal results.</li>
-                <li>Explore the anatomical considerations and precision required for these specialized procedures.</li>
-            </ul>
-            
-            <h3>Afternoon Session: Hands-On Mastery</h3>
-            <ul>
-                <li>Transition to the practical phase, where participants apply what they´ve learned in real-life scenarios, working in pairs for a comprehensive understanding of client interactions and treatment execution.</li>
-                <li>Practice the three-point brow lift technique and advanced applications for the mentalis (chin) and DAO, ensuring a grasp of the nuanced adjustments needed for these areas.</li>
-                <li>Receive direct supervision from master injectors who provide immediate feedback and ensure accurate technique and patient safety.</li>
-            </ul>
-            
-            <p>This workshop is tailored for professionals who have completed our foundational course and are seeking to refine their skills in advanced botulinum toxin treatments. With an emphasis on complex areas, this course promises to enhance your capabilities, ensuring you can offer a broader range of aesthetic solutions with confidence and precision.</p>');
+            <p>Elevate your aesthetic practice with this Level 2 intensive program, designed for practitioners ready to master sophisticated, real-world neurotoxin applications.</p>
+            <p>This course integrates a deep theoretical framework with practical expertise, focusing on transformative facial enhancements beyond the basics.</p>
+            <p>Participants will delve into the anatomy and precision required for complex areas, including Anterior Platysma Bands for jawline contouring, Masseter injectionsfor jaw slimming (the "Youthful Triangle"), and targeted treatments for Bunny Lines (Nasalis).</p>
+            <p>The program transitions into a comprehensive Hands-On Mastery session where theory meets clinical practice. Under the direct supervision of master injectors, you will work in pairs to simulate authentic client interactions and execute advanced techniques.</p>
+            <p>You will practice three-point brow lifts, lip flips, and specialized applications for the mentalis (chin) and DAO, ensuring a grasp of the nuanced dosage and adjustments needed for high-impact results.</p>');
 
-                    $this->set('seemore', 'https://blog.myspalive.com/certified-schools');
         $this->set('seemore', 'https://blog.myspalive.com/certified-schools');
         $this->success();
     }
