@@ -5792,9 +5792,9 @@ class LoginController extends AppPluginController{
                 }
 
                 if($sub_active < 2){
-                    $step = "SUBSCRIPTIONPENDING";
+                    $step = $this->resolveSubscriptionPendingStep(USER_ID);
 
-                    if($therapy_status=="ACCEPTED"){
+                    if($therapy_status=="ACCEPTED" && $step === 'SUBSCRIPTIONPENDING'){
                         $step = "STARTPROVIDINGTREATMENTS";
                     }
 
@@ -5807,9 +5807,9 @@ class LoginController extends AppPluginController{
                     return;
                 }
             }else{
-                $step = "SUBSCRIPTIONPENDING";
+                $step = $this->resolveSubscriptionPendingStep(USER_ID);
 
-                if($therapy_status=="ACCEPTED"){
+                if($therapy_status=="ACCEPTED" && $step === 'SUBSCRIPTIONPENDING'){
                     $step = "STARTPROVIDINGTREATMENTS";
                 }
 
@@ -5837,7 +5837,16 @@ class LoginController extends AppPluginController{
             if(Count($ent_subscriptions) > 0 && (!empty($user_course_basic) && !empty($user_course_school_advanced)) && $ent_user->steps != 'HOME'){
 
                 if ($ent_user->steps == 'SUBSCRIPTIONPENDING') {
-                    $this->set('step', 'SUBSCRIPTIONPENDING');
+                    $normalizedStep = $this->resolveSubscriptionPendingStep(USER_ID);
+                    if ($normalizedStep !== 'SUBSCRIPTIONPENDING') {
+                        $this->SysUsers->updateAll(
+                            ['steps' => $normalizedStep],
+                            ['id' => USER_ID]
+                        );
+                        $this->set('step', $normalizedStep);
+                    } else {
+                        $this->set('step', 'SUBSCRIPTIONPENDING');
+                    }
                     $this->success();
                     return;
                 }
@@ -5898,48 +5907,52 @@ class LoginController extends AppPluginController{
                 $ent_subscriptions_cancelled = $this->DataSubscriptions->find()->where(['DataSubscriptions.user_id' => USER_ID,'DataSubscriptions.deleted' => 0,'DataSubscriptions.status' => 'CANCELLED'])->all();
 
                 if(Count($ent_subscriptions_cancelled) > 0 && $sub_active == 0){
+                    $pendingStep = $this->resolveSubscriptionPendingStep(USER_ID);
                     $this->SysUsers->updateAll(
-                        ['steps' => 'SUBSCRIPTIONPENDING'], 
+                        ['steps' => $pendingStep], 
                         ['id' =>  USER_ID]
                     );
                     $this->success();
-                    $this->set('step', 'SUBSCRIPTIONPENDING');  
+                    $this->set('step', $pendingStep);  
                     return;
                 }
 
                 $ent_subscriptions_hold = $this->DataSubscriptions->find()->where(['DataSubscriptions.user_id' => USER_ID,'DataSubscriptions.deleted' => 0,'DataSubscriptions.status' => 'HOLD'])->all();
 
                 if(Count($ent_subscriptions_hold) > 0){
+                    $pendingStep = $this->resolveSubscriptionPendingStep(USER_ID);
                     $this->SysUsers->updateAll(
-                        ['steps' => 'SUBSCRIPTIONPENDING'], 
+                        ['steps' => $pendingStep], 
                         ['id' =>  USER_ID]
                     );
                     $this->success();
-                    $this->set('step', 'SUBSCRIPTIONPENDING');
+                    $this->set('step', $pendingStep);
                     return;
                 }
 
                 $ent_subscriptions_trial = $this->DataSubscriptions->find()->where(['DataSubscriptions.user_id' => USER_ID,'DataSubscriptions.deleted' => 0,'DataSubscriptions.status' => 'TRIALONHOLD'])->all();
                 
                 if(Count($ent_subscriptions_trial) > 0){
+                    $pendingStep = $this->resolveSubscriptionPendingStep(USER_ID);
                     $this->SysUsers->updateAll(
-                        ['steps' => 'SUBSCRIPTIONPENDING'], 
+                        ['steps' => $pendingStep], 
                         ['id' =>  USER_ID]
                     );
                     $this->success();
-                    $this->set('step', 'SUBSCRIPTIONPENDING');
+                    $this->set('step', $pendingStep);
                     return;
                 }
 
                 $ent_subscriptions = $this->DataSubscriptions->find()->where(['DataSubscriptions.user_id' => USER_ID,'DataSubscriptions.deleted' => 0,'DataSubscriptions.status' => 'ACTIVE'])->all();
 
                 if(Count($ent_subscriptions) < 1){
+                    $pendingStep = $this->resolveSubscriptionPendingStep(USER_ID);
                     $this->SysUsers->updateAll(
-                        ['steps' => 'SUBSCRIPTIONPENDING'], 
+                        ['steps' => $pendingStep], 
                         ['id' =>  USER_ID]
                     );
                     $this->success();
-                    $this->set('step', 'SUBSCRIPTIONPENDING');
+                    $this->set('step', $pendingStep);
                     return;
                 }
             }
@@ -6371,6 +6384,71 @@ class LoginController extends AppPluginController{
         }
 
         return 3;
+    }
+
+    /**
+     * When subscription payment is required, map injectors to the correct resume step.
+     * Order: other schools -> MDSCHOOLSUBSCRIPTION; else IV therapy -> APPIVAPPROVED; else SUBSCRIPTIONPENDING.
+     *
+     * @param int|string $user_id USER_ID may be a string at runtime (strict_types).
+     */
+    private function resolveSubscriptionPendingStep($user_id): string
+    {
+        $userId = (int) $user_id;
+
+        $this->loadModel('SpaLiveV1.DataSubscriptions');
+        $subs = $this->DataSubscriptions->find()
+            ->where([
+                'DataSubscriptions.user_id' => $userId,
+                'DataSubscriptions.deleted' => 0,
+            ])
+            ->order(['DataSubscriptions.id' => 'DESC'])
+            ->toArray();
+
+        // 1) Other schools (subscription flag or completed course with school option)
+        if ($this->injectorIsOtherSchoolTrack($userId, $subs)) {
+            return 'MDSCHOOLSUBSCRIPTION';
+        }
+
+        // 2) IV therapy (subscription IVT / IV services or consult_iv_application path)
+        $Therapy = new TherapyController();
+        if ($Therapy->injectorHasIvTherapyIndicators($userId, $subs)) {
+            return 'APPIVAPPROVED';
+        }
+
+        return 'SUBSCRIPTIONPENDING';
+    }
+
+    /**
+     * Other-school injectors: data_subscriptions.other_school, or any DONE course tied to cat_school_option_cert.
+     */
+    private function injectorIsOtherSchoolTrack(int $user_id, array $subs): bool
+    {
+        foreach ($subs as $sub) {
+            if ((int)($sub->other_school ?? 0) === 1) {
+                return true;
+            }
+        }
+
+        $this->loadModel('SpaLiveV1.DataCourses');
+        $fromSchoolCourse = $this->DataCourses->find()
+            ->select(['DataCourses.id'])
+            ->join([
+                'CatCourses' => [
+                    'table' => 'cat_courses',
+                    'type' => 'INNER',
+                    'conditions' => 'CatCourses.id = DataCourses.course_id',
+                ],
+            ])
+            ->where([
+                'DataCourses.user_id' => $user_id,
+                'DataCourses.deleted' => 0,
+                'DataCourses.status' => 'DONE',
+                'CatCourses.school_option_id >' => 0,
+            ])
+            ->first();
+
+        return !empty($fromSchoolCourse);
     }
 
     public function load_injector_settings() {
