@@ -1181,6 +1181,68 @@ class TherapyController extends AppPluginController {
 
     }
 
+    /**
+     * IV therapy: IVT / IV THERAPY subscription rows, else consult_iv_application() (same rules as get_iv_application).
+     *
+     * @param int $user_id Injector user id
+     * @param array<\Cake\Datasource\EntityInterface>|null $subscriptions Pre-loaded data_subscriptions for user (newest first). Pass null to load.
+     */
+    public function injectorHasIvTherapyIndicators(int $user_id, ?array $subscriptions = null): bool
+    {
+        if ($subscriptions === null) {
+            $this->loadModel('SpaLiveV1.DataSubscriptions');
+            $subscriptions = $this->DataSubscriptions->find()
+                ->where([
+                    'DataSubscriptions.user_id' => $user_id,
+                    'DataSubscriptions.deleted' => 0,
+                ])
+                ->order(['DataSubscriptions.id' => 'DESC'])
+                ->toArray();
+        }
+
+        foreach ($subscriptions as $sub) {
+            if ($this->dataSubscriptionRowIndicatesIvTherapy($sub)) {
+                return true;
+            }
+        }
+
+        $consult = $this->consult_iv_application($user_id);
+
+        return !in_array($consult, ['HAS NOT APPLIED', 'HAS NOT APPLIED WITH LICENSE'], true);
+    }
+
+    private function dataSubscriptionRowIndicatesIvTherapy($sub): bool
+    {
+        static $ivSubscriptionTypes = [
+            'SUBSCRIPTIONMSLIVT',
+            'SUBSCRIPTIONMDIVT',
+            'SUBSCRIPTIONMSL+IVT',
+            'SUBSCRIPTIONMD+IVT',
+            'SUBSCRIPTIONMSLIVTFILLERS',
+            'SUBSCRIPTIONMDIVTFILLERS',
+            'SUBSCRIPTIONMSL+IVT+FILLERS',
+            'SUBSCRIPTIONMD+IVT+FILLERS',
+        ];
+
+        $type = (string)($sub->subscription_type ?? '');
+        if ($type !== '' && in_array($type, $ivSubscriptionTypes, true)) {
+            return true;
+        }
+        if ($type !== '' && stripos($type, 'IVT') !== false) {
+            return true;
+        }
+        $main = (string)($sub->main_service ?? '');
+        $addons = (string)($sub->addons_services ?? '');
+        if ($main !== '' && stripos($main, 'IV THERAPY') !== false) {
+            return true;
+        }
+        if ($addons !== '' && stripos($addons, 'IV THERAPY') !== false) {
+            return true;
+        }
+
+        return false;
+    }
+
     public function get_trainings_prices(){
         
         $token = get('token',"");
@@ -1594,15 +1656,12 @@ class TherapyController extends AppPluginController {
                     }
                     
                 }else{
-                    if(!empty(($license['license']))){
+                    if(!empty($license['license'])){
                         if($license['license']['status']=="PENDING"){
                             return "PENDING";
                         }
                     }
-                    else{
-                        return "REJECTED";
-                    }
-                    
+                    return "REJECTED";
                 }
 
             }else if($ent_iv_training["DataTrainings"]["attended"]==2){
@@ -1611,7 +1670,7 @@ class TherapyController extends AppPluginController {
                 
         }
 
-        $this->success();
+        return 'HAS NOT APPLIED';
     }
 
     public function get_iv_application(){

@@ -21629,7 +21629,7 @@ class MainController extends AppPluginController {
             }
         }*/
 
-        if ($notify_sms /*&& $av_result && $is_dev === false */) {
+        if ($notify_sms && !$is_dev) {
             
             $notification_type = 'SMS';
 
@@ -21661,43 +21661,49 @@ class MainController extends AppPluginController {
                 set_time_limit(0);
                 ini_set('max_execution_time', '0');
 
-                if (!empty($ent_devices)) {
-                    $sid = env('TWILIO_ACCOUNT_SID');
-                    $token = env('TWILIO_AUTH_TOKEN');
-                    $twilio = new Client($sid, $token);
-                    $twilio_number = "+19516434078";
-                    $smsCount = count($ent_devices);
-                    $smsIndex = 0;
+                $sid = env('TWILIO_ACCOUNT_SID');
+                $token = env('TWILIO_AUTH_TOKEN');
+                if (empty($sid) || empty($token)) {
+                    $this->log(__METHOD__ . ' SMS skipped: Twilio credentials are not configured.');
+                } else {
+                    try {
+                        $twilio = new Client($sid, $token);
+                        $twilio_number = "+19516434078";
+                        $smsCount = count($ent_devices);
+                        $smsIndex = 0;
 
-                    foreach ($ent_devices as $ele) {
-                        $phone_number = '+1' . $ele['phone'];
-                        try {
-                            if ($bulk) {
-                                $twilio_message = $twilio->messages
-                                    ->create($phone_number, [
-                                        'body' => $conf_body_push,
-                                        'from' => $twilio_number,
-                                    ]);
-                            } else {
-                                $twilio_message = $twilio->messages
-                                    ->create($phone_number, [
-                                        'messagingServiceSid' => 'MG65978a5932f4ba9dd465e05d7b22195e',
-                                        'body' => $conf_body_push,
-                                    ]);
+                        foreach ($ent_devices as $ele) {
+                            $phone_number = '+1' . $ele['phone'];
+                            try {
+                                if ($bulk) {
+                                    $twilio_message = $twilio->messages
+                                        ->create($phone_number, [
+                                            'body' => $conf_body_push,
+                                            'from' => $twilio_number,
+                                        ]);
+                                } else {
+                                    $twilio_message = $twilio->messages
+                                        ->create($phone_number, [
+                                            'messagingServiceSid' => 'MG65978a5932f4ba9dd465e05d7b22195e',
+                                            'body' => $conf_body_push,
+                                        ]);
+                                }
+                                $account_sid = $twilio_message->accountSid;
+                            } catch (TwilioException $e) {
+                                if ($bulk) {
+                                    $this->log(__LINE__ . ' TwilioException bulk ' . $phone_number . ' ' . $conf_body_push . ' ' . json_encode($e->getCode()));
+                                } else {
+                                    $this->log(__LINE__ . ' TwilioException ' . $phone_number . ' ' . $conf_body_push . ' ' . json_encode($e->getCode()));
+                                }
                             }
-                            $account_sid = $twilio_message->accountSid;
-                        } catch (TwilioException $e) {
-                            if ($bulk) {
-                                $this->log(__LINE__ . ' TwilioException bulk ' . $phone_number . ' ' . $conf_body_push . ' ' . json_encode($e->getCode()));
-                            } else {
-                                $this->log(__LINE__ . ' TwilioException ' . $phone_number . ' ' . $conf_body_push . ' ' . json_encode($e->getCode()));
+                            // Twilio messaging rate ~1 MPS for this account; wait before the next send.
+                            $smsIndex++;
+                            if ($smsIndex < $smsCount) {
+                                sleep(1);
                             }
                         }
-                        // Twilio messaging rate ~1 MPS for this account; wait before the next send.
-                        $smsIndex++;
-                        if ($smsIndex < $smsCount) {
-                            sleep(1);
-                        }
+                    } catch (TwilioException $e) {
+                        $this->log(__METHOD__ . ' Twilio client error: ' . $e->getMessage());
                     }
                 }
             }
@@ -34825,22 +34831,24 @@ class MainController extends AppPluginController {
         $result = curl_exec($curl);
         curl_close($curl);
 
-        if(!empty($phone)){
+        if(!empty($phone) && !env('IS_DEV', false)){
             $phone_number = '+1' . $phone;
             $body_sms = "Big news! " . USER_NAME . " " . USER_LNAME . " rolled out the red carpet just for you with an invite to MySpaLive.Get custom treatments, book with ease, and enjoy pro-level pampering wherever you are. Let the glam begin - download now: myspalive.com/redirect We’re here if you have questions: patientrelations@myspalive.com";
-            try {           
-                $sid    = env('TWILIO_ACCOUNT_SID'); 
-                $token  = env('TWILIO_AUTH_TOKEN'); 
-                $twilio = new Client($sid, $token); 
-                    
-                $message = $twilio->messages 
-                            ->create($phone_number, // to 
-                                    array(  
-                                        "messagingServiceSid" => "MG65978a5932f4ba9dd465e05d7b22195e",      
-                                        "body" => $body_sms 
-                                    ) 
-                            );
-            } catch (TwilioException $e) {
+            $sid = env('TWILIO_ACCOUNT_SID');
+            $token = env('TWILIO_AUTH_TOKEN');
+            if (!empty($sid) && !empty($token)) {
+                try {
+                    $twilio = new Client($sid, $token);
+
+                    $message = $twilio->messages
+                                ->create($phone_number, // to
+                                        array(
+                                            "messagingServiceSid" => "MG65978a5932f4ba9dd465e05d7b22195e",
+                                            "body" => $body_sms
+                                        )
+                                );
+                } catch (TwilioException $e) {
+                }
             }
         }
 
