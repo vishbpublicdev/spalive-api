@@ -57,6 +57,53 @@ class SubscriptionController extends AppPluginController {
         return $this->mailgunKey;
     }
 
+    // Evita doble cobro reciente: mismo customer, monto, moneda, descripción, payment method y ventana (seg).
+    private function findRecentDuplicateOtPaymentIntentId($customerId, $amountCents, $windowSeconds, $paymentMethod, $description)
+    {
+        $amountCents = (int)$amountCents;
+        $windowSeconds = (int)$windowSeconds;
+        if ($amountCents < 1 || $windowSeconds < 1) {
+            return null;
+        }
+        $customerId = trim((string)$customerId);
+        $paymentMethod = trim((string)$paymentMethod);
+        $description = trim((string)$description);
+        if ($customerId == '' || $paymentMethod == '' || $description == '') {
+            return null;
+        }
+        $since = time() - $windowSeconds;
+        try {
+            $intents = \Stripe\PaymentIntent::all([
+                'customer' => $customerId,
+                'limit' => 50,
+                'created' => ['gte' => $since],
+            ]);
+        } catch (\Throwable $e) {
+            return null;
+        }
+        foreach ($intents->data as $pi) {
+            if ((int)$pi->amount != $amountCents) {
+                continue;
+            }
+            if (strtolower((string)$pi->currency) != 'usd') {
+                continue;
+            }
+            if ((string)$pi->status != 'succeeded') {
+                continue;
+            }
+            $piDesc = isset($pi->description) ? trim((string)$pi->description) : '';
+            if ($piDesc != $description) {
+                continue;
+            }
+            $piPm = isset($pi->payment_method) ? trim((string)$pi->payment_method) : '';
+            if ($piPm == '' || $piPm != $paymentMethod) {
+                continue;
+            }
+            return (string)$pi->id;
+        }
+        return null;
+    }
+
 	public function initialize() : void {
         parent::initialize();
 		$this->loadModel('SpaLiveV1.AppToken');
@@ -2143,6 +2190,26 @@ class SubscriptionController extends AppPluginController {
 
             if ($is_other_schools || $has_cancelled_subscription || $is_iv_therapy) {
 
+                $payment_method = trim($payment_method);
+                if ($payment_method == '') {
+                    $this->message('Invalid payment method.');
+                    return;
+                }
+                $ot_stripe_description = 'OT MySpaLive Subscription';
+                $customerId = is_object($customer) ? $customer->id : $customer['id'];
+                $chargeAmount = (int)($total_msl_total + $total_md_total);
+                $dupPi = $this->findRecentDuplicateOtPaymentIntentId(
+                    $customerId,
+                    $chargeAmount,
+                    900,
+                    $payment_method,
+                    $ot_stripe_description
+                );
+                if ($dupPi != null) {
+                    $this->message('A recent payment with the same amount may already be processing. If you were charged, please wait or contact support before trying again.');
+                    return;
+                }
+
                 $error = '';
                 try {
                     $stripe_result = \Stripe\PaymentIntent::create([
@@ -2152,7 +2219,7 @@ class SubscriptionController extends AppPluginController {
                     'payment_method' => $payment_method,
                     'off_session' => true,
                     'confirm' => true,
-                    'description' => 'OT MySpaLive Subscription'
+                    'description' => $ot_stripe_description,
                     ]);
                 } catch(Stripe_CardError $e) {
                     $error = $e->getMessage();
@@ -2691,6 +2758,25 @@ class SubscriptionController extends AppPluginController {
 
             // Procesar pago si tiene suscripciones canceladas o HOLD
             if ($has_cancelled_subscription || $is_other_schools) {
+                $payment_method = trim($payment_method);
+                if ($payment_method == '') {
+                    $this->message('Invalid payment method.');
+                    return;
+                }
+                $ot_stripe_description = 'OT MySpaLive Subscription';
+                $customerId = is_object($customer) ? $customer->id : $customer['id'];
+                $chargeAmount = (int)($total_msl_total + $total_md_total);
+                $dupPi = $this->findRecentDuplicateOtPaymentIntentId(
+                    $customerId,
+                    $chargeAmount,
+                    900,
+                    $payment_method,
+                    $ot_stripe_description
+                );
+                if ($dupPi != null) {
+                    $this->message('A recent payment with the same amount may already be processing. If you were charged, please wait or contact support before trying again.');
+                    return;
+                }
                 try {
                     $stripe_result = \Stripe\PaymentIntent::create([
                     'amount' => $total_msl_total + $total_md_total,
@@ -2699,7 +2785,7 @@ class SubscriptionController extends AppPluginController {
                     'payment_method' => $payment_method,
                     'off_session' => true,
                     'confirm' => true,
-                    'description' => 'OT MySpaLive Subscription'
+                    'description' => $ot_stripe_description,
                     ]);
                 } catch(Stripe_CardError $e) {
                     $error = $e->getMessage();
