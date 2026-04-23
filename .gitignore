@@ -1,3 +1,4 @@
+config/migration_sys_users.php
 # CakePHP 3
 
 /vendor/*
