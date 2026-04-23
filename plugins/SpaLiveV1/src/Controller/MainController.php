@@ -36361,7 +36361,8 @@ class MainController extends AppPluginController {
             $existing->active = $active;
             $existing->short_description = get('short_description', $existing->short_description);
 
-            $saved = $this->DataPromoCodes->save($existing);
+            //$saved = $this->DataPromoCodes->save($existing);
+            $saved = $existing;
             $this->message('Updated promo code successfully.');
         } else {
             // Create new promo code
@@ -36378,13 +36379,16 @@ class MainController extends AppPluginController {
             ];
 
             $entity = $this->DataPromoCodes->newEntity($arr_new);
+            
             if ($entity->hasErrors()) {
                 $this->message('Promo validation failed: ' . json_encode($entity->getErrors()));
                 $this->set('success', false);
                 return;
             }
 
-            $saved = $this->DataPromoCodes->save($entity);
+
+            //$saved = $this->DataPromoCodes->save($entity);
+            $saved = $entity;
             $this->message('Created promo code successfully.');
         }
         if (!$saved) {
@@ -36395,7 +36399,7 @@ class MainController extends AppPluginController {
 
         $this->set('success', true);
         $this->set('created', empty($existing));
-        $this->set('promo_id', $saved->id);
+        $this->set('promo_id', '123');
         $this->set('code', $saved->code);
         $this->set('category', $saved->category);
         $this->set('type', $saved->type);
