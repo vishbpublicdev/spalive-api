@@ -1647,6 +1647,13 @@ class MainController extends AppPluginController {
                 'COURSEMSL',
                 'OTHERCOURSE',
                 'OTHER_COURSE',
+                'ADVANCED TECHNIQUES COURSE',
+                'Dermaplaning + Peel + Microneedling',
+                'Dermaplaning + Peel Course',
+                'MySpaLive´s Hybrid Tox & Filler Course',
+                'MYSPALIVES_HYBRID_TOX_FILLER_COURSE',
+                'LEVEL_TWO_DUAL_TOX_AND_DEMALL_FILLER','FILLER_COURSE_LEVEL_1',
+                'MYSPALIVES_HYBRID_TOX_FILLER_COURSE','MICRONEEDLING','DERMAPLANING_PEEL_COURSE'
             ];
             $courseTypeInList = "'" . implode("','", $injectorCoursePurchaseTypes) . "'";
             $notExistsCoursePaymentSql = 'NOT EXISTS (SELECT 1 FROM data_payment dp WHERE dp.id_from = SysUsers.id AND dp.id_to = 0 AND dp.payment <> \'\' AND dp.is_visible = 1 AND dp.refund_id = 0 AND dp.type IN (' . $courseTypeInList . '))';
@@ -22868,6 +22875,9 @@ class MainController extends AppPluginController {
 
         $tr_result = array();
 
+        // Same levels as CourseController::validateBasicTraining — hybrid counts as prerequisite for Level 2 / Advanced.
+        $hybrid_basic_equivalent_levels = ['MYSPALIVES_HYBRID_TOX_FILLER_COURSE', 'MYSPALIVE_S_HYBRID_TOX_FILLER_COURSE'];
+
         $_fields = ['CatTrainigs.id', 'CatTrainigs.title', 'CatTrainigs.scheduled', 'CatTrainigs.neurotoxins', 'CatTrainigs.fillers', 'CatTrainigs.materials', 'CatTrainigs.available_seats', 'CatTrainigs.level','State.name','State.abv','CatTrainigs.address','CatTrainigs.zip','CatTrainigs.city', 'data_training_id' => 'DataTrainigs.id', 'attended' => 'DataTrainigs.attended'];
         $_fields['assistants'] = "(SELECT COUNT(id) from data_trainings DT WHERE DT.training_id = CatTrainigs.id AND DT.deleted = 0)";
         $_fields['enrolled'] = "(SELECT COUNT(id) from data_trainings DT WHERE DT.training_id = CatTrainigs.id AND DT.deleted = 0 AND DT.user_id = " . USER_ID . " )";
@@ -22880,6 +22890,15 @@ class MainController extends AppPluginController {
         $done_trainings = $this->CatTrainigs->find()->select($_fields)
         ->join($_join)
         ->where($_where)->order(['CatTrainigs.scheduled' => 'ASC'])->toArray();
+
+        $done_hybrid_basic_equivalent = [];
+        if (empty($done_trainings)) {
+            $_where_hybrid = ['DataTrainigs.user_id' => USER_ID, 'DataTrainigs.deleted' => 0, 'CatTrainigs.deleted' => 0,'(DATE_FORMAT(CatTrainigs.scheduled, "%Y-%m-%d 09:00:00") < "' . $now . '")', 'CatTrainigs.level IN' => $hybrid_basic_equivalent_levels];
+            $done_hybrid_basic_equivalent = $this->CatTrainigs->find()->select($_fields)
+                ->join($_join)
+                ->where($_where_hybrid)->order(['CatTrainigs.scheduled' => 'ASC'])->toArray();
+        }
+        $has_completed_basic_prerequisite = !empty($done_trainings) || !empty($done_hybrid_basic_equivalent);
 
 
         $c_date = new \DateTime('2023-02-27 00:00:00');
@@ -22916,7 +22935,7 @@ class MainController extends AppPluginController {
             );
         }
 
-        if (empty($done_trainings)) {
+        if (!$has_completed_basic_prerequisite) {
             //CHECK IF INYECTOR HAVE IV THERAPY APP
             $show_buy_button_advanced = false;
             
@@ -23100,11 +23119,19 @@ class MainController extends AppPluginController {
 
         // DONE LVL 2
 
+        $levels_for_advanced_prerequisite = array_merge(['LEVEL 1'], $hybrid_basic_equivalent_levels);
         $training_level_one = $this->DataTrainings->find()->select(['CatTrainigs.scheduled'])
                                    ->join([
                                         'CatTrainigs' => ['table' => 'cat_trainings', 'type' => 'INNER', 'conditions' => 'CatTrainigs.id = DataTrainings.training_id'],
                                    ])
-                                   ->where(['DataTrainings.user_id' => USER_ID, 'DataTrainings.deleted' => 0, 'CatTrainigs.level' => 'LEVEL 1', 'CatTrainigs.deleted' => 0])
+                                   ->where([
+                                       'DataTrainings.user_id' => USER_ID,
+                                       'DataTrainings.deleted' => 0,
+                                       'CatTrainigs.level IN' => $levels_for_advanced_prerequisite,
+                                       'CatTrainigs.deleted' => 0,
+                                       '(DATE_FORMAT(CatTrainigs.scheduled, "%Y-%m-%d 09:00:00") < "' . $now . '")',
+                                   ])
+                                   ->order(['CatTrainigs.scheduled' => 'DESC'])
                                    ->first();
 
         $tr_result = array();

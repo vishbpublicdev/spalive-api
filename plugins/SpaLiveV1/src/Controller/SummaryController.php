@@ -9731,12 +9731,16 @@ class SummaryController extends AppPluginController{
 
         $ent_sub = $this->DataSubscriptions->find()->where(['DataSubscriptions.user_id' => $user_id, 'DataSubscriptions.status' => 'ACTIVE', 'DataSubscriptions.subscription_type LIKE' => '%MD%', 'DataSubscriptions.deleted' => 0])->first();
 
-        $mian = $ent_sub->main_service;
-        $add_on = $ent_sub->addons_services;
-
         $neuro = false;
         $iv = false;
         $fillers = false;
+        
+        if (empty($ent_sub)) {
+            return array('neuro' => $neuro, 'iv' => $iv, 'fillers' => $fillers);
+        }
+
+        $mian = (string)($ent_sub->main_service ?? '');
+        $add_on = (string)($ent_sub->addons_services ?? '');
 
         if(strpos($mian, 'NEUROTOXINS') !== false || strpos($add_on, 'NEUROTOXINS') !== false){
             $neuro = true;

@@ -129,6 +129,31 @@ class PaymentsController extends AppPluginController{
         return $sum > 0 ? $sum : (int)$headerAmountCents;
     }
 
+    private function sanitizePurchasePromoCode(string $promoCode): string
+    {
+        return $this->isAllPromoEndingIn400($promoCode) ? '' : $promoCode;
+    }
+
+    private function isAllPromoEndingIn400(string $promoCode): bool
+    {
+        $normalizedCode = strtoupper(trim($promoCode));
+        if ($normalizedCode === '' || !preg_match('/400$/', $normalizedCode)) {
+            return false;
+        }
+
+        $this->loadModel('SpaLiveV1.DataPromoCodes');
+        $entCode = $this->DataPromoCodes->find()
+            ->where([
+                'DataPromoCodes.deleted' => 0,
+                'DataPromoCodes.active' => 1,
+                'DataPromoCodes.code' => $normalizedCode,
+                'DataPromoCodes.category' => 'ALL',
+            ])
+            ->first();
+
+        return !empty($entCode);
+    }
+
 	public function initialize() : void{
         parent::initialize();
         date_default_timezone_set("America/Chicago");
@@ -513,6 +538,9 @@ class PaymentsController extends AppPluginController{
         $purchaseAmountForPromo = $this->purchaseMerchandiseSubtotalForPromo($_ent_purchases, $ent_purchase->amount);
 
         $code = strtoupper(trim(get('promo_code', '')));
+        if (!$isSingleCoursePurchase) {
+            $code = $this->sanitizePurchasePromoCode($code);
+        }
         $this->loadModel('SpaLiveV1.DataCodeEc');
         $ent_promo = $this->DataCodeEc->find()->last();
 
@@ -3872,6 +3900,7 @@ class PaymentsController extends AppPluginController{
         }
        
         $code = strtoupper(trim(get('promo_code', '')));
+        $code = $this->sanitizePurchasePromoCode($code);
         $this->loadModel('SpaLiveV1.DataCodeEc');
         $ent_promo = $this->DataCodeEc->find()->last();
 
