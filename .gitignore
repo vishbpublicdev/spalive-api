@@ -50,3 +50,4 @@ config/migration_sys_users.php
 
 /.env
 composer.phar
+.git-credentials-local
