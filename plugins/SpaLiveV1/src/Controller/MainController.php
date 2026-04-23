@@ -964,6 +964,16 @@ class MainController extends AppPluginController {
         
     }
 
+    private function isAllCategoryPromoCodeEndingIn400RowMain($entCode): bool
+    {
+        if (empty($entCode) || $entCode->category !== 'ALL') {
+            return false;
+        }
+        $promoCode = strtoupper(trim((string)($entCode->code ?? '')));
+
+        return $promoCode !== '' && (bool)preg_match('/400$/', $promoCode);
+    }
+
     private function validateCode($code,$subtotal,$category,$treatment_array = array()) {
 
         $this->loadModel('SpaLiveV1.DataPromoCodes');
@@ -973,6 +983,11 @@ class MainController extends AppPluginController {
         if (!empty($ent_codes)) {
 
             if ($ent_codes->category != 'ALL' && $ent_codes->category != $category) {
+                $this->set('code_valid', false);
+                return $subtotal;
+            }
+
+            if ($category === 'TREATMENT' && $this->isAllCategoryPromoCodeEndingIn400RowMain($ent_codes)) {
                 $this->set('code_valid', false);
                 return $subtotal;
             }

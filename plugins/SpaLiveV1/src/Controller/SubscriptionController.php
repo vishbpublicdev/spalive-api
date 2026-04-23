@@ -85,6 +85,21 @@ class SubscriptionController extends AppPluginController {
         }
     }
 
+    private function isAllCategoryPromoCodeEndingIn400RowSubscription($entCode): bool
+    {
+        if (empty($entCode) || $entCode->category !== 'ALL') {
+            return false;
+        }
+        $promoCode = strtoupper(trim((string)($entCode->code ?? '')));
+
+        return $promoCode !== '' && (bool)preg_match('/400$/', $promoCode);
+    }
+
+    private function isAll400PromoDisallowedForSubscriptionCategory(string $category): bool
+    {
+        return $category !== '' && strpos($category, 'SUBSCRIPTION') === 0;
+    }
+
     public function validateCode($code,$subtotal,$category) {
 
         $this->loadModel('SpaLiveV1.DataPromoCodes');
@@ -96,6 +111,12 @@ class SubscriptionController extends AppPluginController {
         if (!empty($ent_codes)) {
 
             if ($ent_codes->category != 'ALL' && $ent_codes->category != $category) {
+                $this->set('code_valid', false);
+                return $subtotal;
+            }
+
+            if ($this->isAllCategoryPromoCodeEndingIn400RowSubscription($ent_codes)
+                && $this->isAll400PromoDisallowedForSubscriptionCategory($category)) {
                 $this->set('code_valid', false);
                 return $subtotal;
             }
@@ -1411,7 +1432,7 @@ class SubscriptionController extends AppPluginController {
             $id_charge = '';
             $payment_id = '';
 
-            $md_id = $this->SysUserAdmin->getAssignedDoctorInjector(USER_ID);
+            $md_id = $this->SysUserAdmin->getAssignedDoctorInjector((int)USER_ID);
 
             if(isset($stripe_result->charges->data[0]->receipt_url)) {
                 $receipt_url = $stripe_result->charges->data[0]->receipt_url;
@@ -1660,7 +1681,7 @@ class SubscriptionController extends AppPluginController {
                 $id_charge = '';
                 $payment_id = '';
 
-                $md_id = $this->SysUserAdmin->getAssignedDoctorInjector(USER_ID);
+                $md_id = $this->SysUserAdmin->getAssignedDoctorInjector((int)USER_ID);
 
                 if(isset($stripe_result->charges->data[0]->receipt_url)) {
                     $receipt_url = $stripe_result->charges->data[0]->receipt_url;
@@ -2278,7 +2299,7 @@ class SubscriptionController extends AppPluginController {
             if ($is_other_schools || $has_cancelled_subscription || $is_iv_therapy) {
 
                 if(empty($error) && $stripe_result->status == 'succeeded') {
-                    $doctor_id = $this->SysUserAdmin->getAssignedDoctorInjector(USER_ID);
+                    $doctor_id = $this->SysUserAdmin->getAssignedDoctorInjector((int)USER_ID);
 
                     $c_entity = $this->DataSubscriptionPayments->newEntity([
                         'uid'   => Text::uuid(),
@@ -2824,7 +2845,7 @@ class SubscriptionController extends AppPluginController {
             if ($has_cancelled_subscription || $is_other_schools) {
 
                 if(empty($error) && $stripe_result->status == 'succeeded') {
-                    $doctor_id = $this->SysUserAdmin->getAssignedDoctorInjector(USER_ID);
+                    $doctor_id = $this->SysUserAdmin->getAssignedDoctorInjector((int)USER_ID);
 
                     $c_entity = $this->DataSubscriptionPayments->newEntity([
                         'uid'   => Text::uuid(),
@@ -3165,7 +3186,7 @@ class SubscriptionController extends AppPluginController {
 
 
 
-            $md_id = $this->SysUserAdmin->getAssignedDoctorInjector(USER_ID); 
+            $md_id = $this->SysUserAdmin->getAssignedDoctorInjector((int)USER_ID); 
             $c_entity = $this->DataSubscriptionPayments->newEntity([
                 'uid'   => Text::uuid(),
                 'subscription_id'  => $msl_id->id,
@@ -4000,7 +4021,7 @@ class SubscriptionController extends AppPluginController {
                     $ent_user = $this->SysUsers->find()->where(['SysUsers.id' => $user["user_id"],'SysUsers.deleted' => 0])->first();
                     if(!empty($ent_user)){
 
-                        $md_id = $this->SysUserAdmin->getAssignedDoctorInjector($user["user_id"]);  
+                        $md_id = $this->SysUserAdmin->getAssignedDoctorInjector((int)$user["user_id"]);  
                         
                         $ent_user->type = "gfe+ci";
                         $ent_user->md_id = $md_id;
