@@ -36553,7 +36553,9 @@ class MainController extends AppPluginController {
                     break;
                 case 'COURSE_FILLERS_LEVEL_2':
                 case 'FILLER_COURSE_LEVEL_2':
-                    $type_string = 'FILLER_COURSE_LEVEL_2';
+                case 'LEVEL_TWO_DUAL_TOX_AND_DEMALL_FILLER':
+                    $type_string = 'LEVEL_TWO_DUAL_TOX_AND_DEMALL_FILLER';
+                    break;
                     break;
                 default:
                     $type_string = 'UNKNOWN';
