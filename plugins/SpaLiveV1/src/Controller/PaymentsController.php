@@ -6479,6 +6479,8 @@ class PaymentsController extends AppPluginController{
 
     public function pay_sales_rep() {
 
+        return;
+
         $this->loadModel('SpaLiveV1.DataPayment');
         $this->loadModel('SpaLiveV1.DataSalesRepresentativePayments');
         $this->loadModel('SpaLiveV1.DataAssignedToRegister');
@@ -6652,6 +6654,8 @@ class PaymentsController extends AppPluginController{
     }
 
     public function pay_sales_rep_schools($id_injector,$id_receipt) {
+
+        return;
 
         $this->loadModel('SpaLiveV1.DataPayment');
         $this->loadModel('SpaLiveV1.DataSalesRepresentativePayments');
