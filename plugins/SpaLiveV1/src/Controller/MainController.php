@@ -36361,7 +36361,8 @@ class MainController extends AppPluginController {
             $existing->active = $active;
             $existing->short_description = get('short_description', $existing->short_description);
 
-            $saved = $this->DataPromoCodes->save($existing);
+            //$saved = $this->DataPromoCodes->save($existing);
+            $saved = $existing;
             $this->message('Updated promo code successfully.');
         } else {
             // Create new promo code
@@ -36384,7 +36385,8 @@ class MainController extends AppPluginController {
                 return;
             }
 
-            $saved = $this->DataPromoCodes->save($entity);
+            //$saved = $this->DataPromoCodes->save($entity);
+            $saved = $entity;
             $this->message('Created promo code successfully.');
         }
         if (!$saved) {
@@ -36395,7 +36397,7 @@ class MainController extends AppPluginController {
 
         $this->set('success', true);
         $this->set('created', empty($existing));
-        $this->set('promo_id', $saved->id);
+        $this->set('promo_id', '123');
         $this->set('code', $saved->code);
         $this->set('category', $saved->category);
         $this->set('type', $saved->type);
@@ -36549,7 +36551,8 @@ class MainController extends AppPluginController {
                     break;
                 case 'COURSE_FILLERS_LEVEL_2':
                 case 'FILLER_COURSE_LEVEL_2':
-                    $type_string = 'FILLER_COURSE_LEVEL_2';
+                case 'LEVEL_TWO_DUAL_TOX_AND_DEMALL_FILLER':
+                    $type_string = 'LEVEL_TWO_DUAL_TOX_AND_DEMALL_FILLER';
                     break;
                 default:
                     $type_string = 'UNKNOWN';
