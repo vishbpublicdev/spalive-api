@@ -129,6 +129,58 @@ class PaymentsController extends AppPluginController{
         return $sum > 0 ? $sum : (int)$headerAmountCents;
     }
 
+    private function sanitizePurchasePromoCode(string $promoCode): string
+    {
+        return $this->isAllPromoEndingIn400($promoCode) ? '' : $promoCode;
+    }
+
+    private function isAllPromoEndingIn400(string $promoCode): bool
+    {
+        $normalizedCode = strtoupper(trim($promoCode));
+        if ($normalizedCode === '' || !preg_match('/400$/', $normalizedCode)) {
+            return false;
+        }
+
+        $this->loadModel('SpaLiveV1.DataPromoCodes');
+        $entCode = $this->DataPromoCodes->find()
+            ->where([
+                'DataPromoCodes.deleted' => 0,
+                'DataPromoCodes.active' => 1,
+                'DataPromoCodes.code' => $normalizedCode,
+                'DataPromoCodes.category' => 'ALL',
+            ])
+            ->first();
+
+        return !empty($entCode);
+    }
+
+    /**
+     * ALL-category promos ending in 400 must not apply to treatment or subscription checkout
+     * (courses/store use other paths). Subscription "apply" uses this controller via
+     * promo_code_subscription, promo_code_subscription_ot, promo_code_subscription_ot_schools, etc.
+     */
+    private function isAllCategoryPromoCodeEndingIn400Row($entCode): bool
+    {
+        if (empty($entCode) || $entCode->category !== 'ALL') {
+            return false;
+        }
+        $code = strtoupper(trim((string)($entCode->code ?? '')));
+
+        return $code !== '' && (bool)preg_match('/400$/', $code);
+    }
+
+    private function isAll400PromoDisallowedForPaymentsValidateCategory(string $category): bool
+    {
+        if ($category === 'TREATMENT') {
+            return true;
+        }
+        if ($category !== '' && strpos($category, 'SUBSCRIPTION') === 0) {
+            return true;
+        }
+
+        return in_array($category, ['IVMSL', 'IVMD'], true);
+    }
+
 	public function initialize() : void{
         parent::initialize();
         date_default_timezone_set("America/Chicago");
@@ -513,6 +565,9 @@ class PaymentsController extends AppPluginController{
         $purchaseAmountForPromo = $this->purchaseMerchandiseSubtotalForPromo($_ent_purchases, $ent_purchase->amount);
 
         $code = strtoupper(trim(get('promo_code', '')));
+        if (!$isSingleCoursePurchase) {
+            $code = $this->sanitizePurchasePromoCode($code);
+        }
         $this->loadModel('SpaLiveV1.DataCodeEc');
         $ent_promo = $this->DataCodeEc->find()->last();
 
@@ -869,6 +924,13 @@ class PaymentsController extends AppPluginController{
         if (!empty($ent_codes)) {
 
             if ($ent_codes->category != 'ALL' && $ent_codes->category != $category) {
+                $this->set('code_valid', false);
+                $this->set('stripe_fee', in_array($category, $courseCategoriesNoStripePass, true) ? 0 : intval($subtotal * 0.0315));
+                return $subtotal;
+            }
+
+            if ($this->isAllCategoryPromoCodeEndingIn400Row($ent_codes)
+                && $this->isAll400PromoDisallowedForPaymentsValidateCategory($category)) {
                 $this->set('code_valid', false);
                 $this->set('stripe_fee', in_array($category, $courseCategoriesNoStripePass, true) ? 0 : intval($subtotal * 0.0315));
                 return $subtotal;
@@ -3872,6 +3934,7 @@ class PaymentsController extends AppPluginController{
         }
        
         $code = strtoupper(trim(get('promo_code', '')));
+        $code = $this->sanitizePurchasePromoCode($code);
         $this->loadModel('SpaLiveV1.DataCodeEc');
         $ent_promo = $this->DataCodeEc->find()->last();
 
