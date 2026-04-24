@@ -32406,6 +32406,126 @@ class MainController extends AppPluginController {
         return $html;
     }
 
+    /**
+     * Download remote images to local temp files for HTML2PDF.
+     * If an image cannot be downloaded/read, remove that image tag to avoid breaking PDF generation.
+     */
+    private function _prepareRemoteImagesForPdf($html, &$tmp_files = []) {
+        if (empty($html)) {
+            return $html;
+        }
+
+        try {
+            $dom = new \DOMDocument();
+            libxml_use_internal_errors(true);
+            $dom->loadHTML('<?xml encoding="UTF-8"><div id="pdf-img-wrap">' . $html . '</div>', LIBXML_HTML_NODEFDTD);
+            libxml_clear_errors();
+
+            $images = $dom->getElementsByTagName('img');
+            if ($images->length === 0) {
+                $node = $dom->getElementById('pdf-img-wrap');
+                if (!$node) {
+                    return $html;
+                }
+                $out = '';
+                foreach ($node->childNodes as $child) {
+                    $out .= $dom->saveHTML($child);
+                }
+                return $out ?: $html;
+            }
+
+            $tmp_dir = TMP . 'files' . DS;
+            if (!is_dir($tmp_dir)) {
+                @mkdir($tmp_dir, 0775, true);
+            }
+
+            for ($i = $images->length - 1; $i >= 0; $i--) {
+                $img = $images->item($i);
+                if (!$img) {
+                    continue;
+                }
+
+                $src = trim((string)$img->getAttribute('src'));
+                if ($src == '') {
+                    continue;
+                }
+
+                $scheme = strtolower((string)parse_url($src, PHP_URL_SCHEME));
+                if ($scheme !== 'http' && $scheme !== 'https') {
+                    continue;
+                }
+
+                $local_path = $this->_downloadImageToTmpForPdf($src, $tmp_dir);
+                if (!empty($local_path)) {
+                    $img->setAttribute('src', $local_path);
+                    $tmp_files[] = $local_path;
+                } else {
+                    // If image is unavailable from remote host, remove it to prevent HTML2PDF fatal error.
+                    $img->parentNode->removeChild($img);
+                    $this->log('print_agreement: removed unreachable image: ' . $src, 'error');
+                }
+            }
+
+            $node = $dom->getElementById('pdf-img-wrap');
+            if (!$node) {
+                return $html;
+            }
+
+            $out = '';
+            foreach ($node->childNodes as $child) {
+                $out .= $dom->saveHTML($child);
+            }
+            return $out ?: $html;
+        } catch (\Throwable $e) {
+            $this->log('_prepareRemoteImagesForPdf error: ' . $e->getMessage(), 'error');
+            return $html;
+        }
+    }
+
+    private function _downloadImageToTmpForPdf($url, $tmp_dir) {
+        $url = trim((string)$url);
+        if ($url == '' || !is_dir($tmp_dir)) {
+            return '';
+        }
+
+        $context = stream_context_create([
+            'http' => [
+                'timeout' => 12,
+                'follow_location' => 1,
+                'user_agent' => 'MySpaLivePDF/1.0'
+            ],
+            'ssl' => [
+                'verify_peer' => true,
+                'verify_peer_name' => true
+            ]
+        ]);
+
+        $raw = @file_get_contents($url, false, $context);
+        if ($raw === false || strlen($raw) < 10) {
+            return '';
+        }
+
+        $path = parse_url($url, PHP_URL_PATH);
+        $ext = strtolower(pathinfo((string)$path, PATHINFO_EXTENSION));
+        if (!in_array($ext, ['jpg', 'jpeg', 'png', 'gif', 'webp'])) {
+            $ext = 'jpg';
+        }
+
+        $filename = 'pdfimg_' . md5($url . microtime(true) . rand(1000, 9999)) . '.' . $ext;
+        $local_path = $tmp_dir . $filename;
+        if (@file_put_contents($local_path, $raw) === false) {
+            return '';
+        }
+
+        $size = @getimagesize($local_path);
+        if ($size === false) {
+            @unlink($local_path);
+            return '';
+        }
+
+        return $local_path;
+    }
+
     public function print_agreement() {
 
         $panel = get('l3n4p', '');
@@ -32466,6 +32586,7 @@ class MainController extends AppPluginController {
         }
         
         $content = '';
+        $tmp_pdf_image_files = [];
         if ($ent) {
             $ent_user = $this->SysUsers->find()->where(['SysUsers.id' => $ent->user_id, 'SysUsers.deleted' => 0])->first();
             if (empty($ent_user)) {
@@ -32499,6 +32620,7 @@ class MainController extends AppPluginController {
             }
             // Repair malformed HTML - DOMDocument auto-closes unclosed tags
             $content = $this->_repairHtmlForPdf($content);
+            $content = $this->_prepareRemoteImagesForPdf($content, $tmp_pdf_image_files);
         } else {
 
             return;
@@ -32513,6 +32635,14 @@ class MainController extends AppPluginController {
             $this->log('print_agreement PDF error: ' . $e->getMessage(), 'error');
             $this->message('Failed to generate PDF: ' . $e->getMessage());
             return;
+        } finally {
+            if (!empty($tmp_pdf_image_files)) {
+                foreach ($tmp_pdf_image_files as $tmp_file) {
+                    if (!empty($tmp_file) && file_exists($tmp_file)) {
+                        @unlink($tmp_file);
+                    }
+                }
+            }
         }
 
     }
