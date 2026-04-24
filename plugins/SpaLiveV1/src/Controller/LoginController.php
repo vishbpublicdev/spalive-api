@@ -4396,11 +4396,28 @@ class LoginController extends AppPluginController{
         $this->set('image', 'https://blog.myspalive.com/wp-content/uploads/2022/06/imagen_2022-06-16_135810439.png');
         $this->set('text', '
             <h3>Course Description:</h3>
-            <p>Elevate your aesthetic practice with this Level 2 intensive program, designed for practitioners ready to master sophisticated, real-world neurotoxin applications.</p>
-            <p>This course integrates a deep theoretical framework with practical expertise, focusing on transformative facial enhancements beyond the basics.</p>
-            <p>Participants will delve into the anatomy and precision required for complex areas, including Anterior Platysma Bands for jawline contouring, Masseter injectionsfor jaw slimming (the "Youthful Triangle"), and targeted treatments for Bunny Lines (Nasalis).</p>
-            <p>The program transitions into a comprehensive Hands-On Mastery session where theory meets clinical practice. Under the direct supervision of master injectors, you will work in pairs to simulate authentic client interactions and execute advanced techniques.</p>
-            <p>You will practice three-point brow lifts, lip flips, and specialized applications for the mentalis (chin) and DAO, ensuring a grasp of the nuanced dosage and adjustments needed for high-impact results.</p>');
+
+            <p>Elevate your aesthetic practice with our advanced neurotoxin training, designed for practitioners ready to build on their foundational skills and expand into more advanced, real-world injection techniques.</p>
+
+            <p>This in-person, interactive course blends a review of core principles with advanced theory and hands-on application, helping you strengthen your understanding of anatomy, muscle dynamics, and safe injection practices as you move into more specialized treatment areas.</p>
+
+            <p>The course focuses on advanced neurotoxin applications with an emphasis on understanding anatomy, muscle interactions, and proper dosing strategies to achieve safe, precise, and natural-looking results.</p>
+
+            <p>Participants will gain hands-on experience working with live models, practicing refined techniques such as targeted dosing, strategic placement, and subtle adjustments across different facial areas.</p>
+
+            <h4>Key treatment areas include:</h4>
+            <ul>
+                <li><strong>Anterior Platysma Bands:</strong> Face lifting and jawline contouring through precise platysma injections</li>
+                <li><strong>Nasalis (Bunny Lines):</strong> Targeted treatment of dynamic wrinkles around the nose</li>
+                <li><strong>Masseter Muscle:</strong> Jaw slimming techniques to create a more defined, “Youthful Triangle”</li>
+                <li><strong>Brow Lift Techniques:</strong> Subtle yet effective lifting through targeted muscle treatment</li>
+                <li><strong>Lip Flip, Mentalis (chin), and DAO:</strong> Advanced applications for facial balance and refinement</li>
+            </ul>
+
+            <p>With a strong emphasis on both foundational understanding and advanced application, this course is ideal for providers looking to refine their skills and expand their treatment offerings.</p>
+
+            <p>You will leave with enhanced knowledge, practical experience, and the ability to deliver a wider range of aesthetic outcomes with precision and confidence.</p>
+        ');
 
         $this->set('seemore', 'https://blog.myspalive.com/certified-schools');
         $this->success();
