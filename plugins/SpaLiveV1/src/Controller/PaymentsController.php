@@ -131,54 +131,21 @@ class PaymentsController extends AppPluginController{
 
     private function sanitizePurchasePromoCode(string $promoCode): string
     {
-        return $this->isAllPromoEndingIn400($promoCode) ? '' : $promoCode;
+        return strtoupper(trim($promoCode));
     }
 
-    private function isAllPromoEndingIn400(string $promoCode): bool
-    {
-        $normalizedCode = strtoupper(trim($promoCode));
-        if ($normalizedCode === '' || !preg_match('/400$/', $normalizedCode)) {
-            return false;
-        }
-
-        $this->loadModel('SpaLiveV1.DataPromoCodes');
-        $entCode = $this->DataPromoCodes->find()
-            ->where([
-                'DataPromoCodes.deleted' => 0,
-                'DataPromoCodes.active' => 1,
-                'DataPromoCodes.code' => $normalizedCode,
-                'DataPromoCodes.category' => 'ALL',
-            ])
-            ->first();
-
-        return !empty($entCode);
-    }
-
-    /**
-     * ALL-category promos ending in 400 must not apply to treatment or subscription checkout
-     * (courses/store use other paths). Subscription "apply" uses this controller via
-     * promo_code_subscription, promo_code_subscription_ot, promo_code_subscription_ot_schools, etc.
-     */
-    private function isAllCategoryPromoCodeEndingIn400Row($entCode): bool
+    private function isAllPromoAllowedForCategory($entCode, $category, $courseCategories): bool
     {
         if (empty($entCode) || $entCode->category !== 'ALL') {
-            return false;
-        }
-        $code = strtoupper(trim((string)($entCode->code ?? '')));
-
-        return $code !== '' && (bool)preg_match('/400$/', $code);
-    }
-
-    private function isAll400PromoDisallowedForPaymentsValidateCategory(string $category): bool
-    {
-        if ($category === 'TREATMENT') {
-            return true;
-        }
-        if ($category !== '' && strpos($category, 'SUBSCRIPTION') === 0) {
             return true;
         }
 
-        return in_array($category, ['IVMSL', 'IVMD'], true);
+        $is_all_99 = ($entCode->type == 'PERCENTAGE' && (int)$entCode->discount == 99);
+        if ($is_all_99) {
+            return true;
+        }
+
+        return in_array($category, $courseCategories, true);
     }
 
 	public function initialize() : void{
@@ -929,8 +896,7 @@ class PaymentsController extends AppPluginController{
                 return $subtotal;
             }
 
-            if ($this->isAllCategoryPromoCodeEndingIn400Row($ent_codes)
-                && $this->isAll400PromoDisallowedForPaymentsValidateCategory($category)) {
+            if (!$this->isAllPromoAllowedForCategory($ent_codes, $category, $courseCategoriesNoStripePass)) {
                 $this->set('code_valid', false);
                 $this->set('stripe_fee', in_array($category, $courseCategoriesNoStripePass, true) ? 0 : intval($subtotal * 0.0315));
                 return $subtotal;
