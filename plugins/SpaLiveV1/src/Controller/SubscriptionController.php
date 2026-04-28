@@ -85,24 +85,24 @@ class SubscriptionController extends AppPluginController {
         }
     }
 
-    private function isAllCategoryPromoCodeEndingIn400RowSubscription($entCode): bool
+    private function isAllPromoAllowedForSubscriptionCategory($entCode, $category, $courseCategories)
     {
         if (empty($entCode) || $entCode->category !== 'ALL') {
-            return false;
+            return true;
         }
-        $promoCode = strtoupper(trim((string)($entCode->code ?? '')));
 
-        return $promoCode !== '' && (bool)preg_match('/400$/', $promoCode);
-    }
+        $is_all_99 = ($entCode->type == 'PERCENTAGE' && (int)$entCode->discount == 99);
+        if ($is_all_99) {
+            return true;
+        }
 
-    private function isAll400PromoDisallowedForSubscriptionCategory(string $category): bool
-    {
-        return $category !== '' && strpos($category, 'SUBSCRIPTION') === 0;
+        return in_array($category, $courseCategories, true);
     }
 
     public function validateCode($code,$subtotal,$category) {
 
         $this->loadModel('SpaLiveV1.DataPromoCodes');
+        $courseCategories = ['REGISTER', 'TRAINING', 'LEVEL3', 'OTCOURSE'];
 
         $_where = ['DataPromoCodes.deleted' => 0,'DataPromoCodes.active' => 1,'DataPromoCodes.code' => strtoupper($code)];
         $_where['OR'] = [['DataPromoCodes.category' => "ALL"], ['DataPromoCodes.category' => $category]];
@@ -115,8 +115,7 @@ class SubscriptionController extends AppPluginController {
                 return $subtotal;
             }
 
-            if ($this->isAllCategoryPromoCodeEndingIn400RowSubscription($ent_codes)
-                && $this->isAll400PromoDisallowedForSubscriptionCategory($category)) {
+            if (!$this->isAllPromoAllowedForSubscriptionCategory($ent_codes, $category, $courseCategories)) {
                 $this->set('code_valid', false);
                 return $subtotal;
             }
