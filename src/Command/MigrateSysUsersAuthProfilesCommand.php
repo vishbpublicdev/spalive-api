@@ -10,12 +10,16 @@ use Cake\Console\ConsoleOptionParser;
 use PDO;
 use Throwable;
 
-class MigrateSysUsersCommand extends Command
+/**
+ * Phase A: sys_users -> auth.users (via Admin API) + auth.identities + public.user_profiles (+ public.patients)
+ * Also maintains public.migration_sys_users_map and a DB checkpoint for resumable runs.
+ */
+class MigrateSysUsersAuthProfilesCommand extends Command
 {
     public function buildOptionParser(ConsoleOptionParser $parser): ConsoleOptionParser
     {
         return $parser
-            ->setDescription('Migrate legacy sys_users to auth.users + user_profiles (+ patients for patient role).')
+            ->setDescription('Phase A: migrate sys_users -> auth + profiles (+patients) + map. Resumable and idempotent.')
             ->addOption('config', [
                 'default' => CONFIG . 'migration_sys_users.php',
                 'help' => 'Absolute path to migration config file.',
@@ -32,19 +36,20 @@ class MigrateSysUsersCommand extends Command
             ])
             ->addOption('from-id', [
                 'default' => 0,
-                'help' => 'For DESC order: start from legacy id < from-id (0 means latest id).',
+                'help' => 'For DESC order: start from legacy id < from-id (0 = resume from checkpoint if enabled).',
             ])
             ->addOption('max-rows', [
                 'default' => 0,
                 'help' => 'Stop after N rows (0 means no limit).',
             ])
-            ->addOption('existing-csv', [
-                'default' => LOGS . 'migration_sys_users_existing_profiles.csv',
-                'help' => 'CSV file path used when user_profiles.user_id already exists.',
+            ->addOption('checkpoint-key', [
+                'default' => 'sys_users:auth_profiles',
+                'help' => 'Checkpoint name used to persist last migrated legacy id.',
             ])
-            ->addOption('dry-run-csv', [
-                'default' => LOGS . 'migration_sys_users_dry_run_preview.csv',
-                'help' => 'CSV file path used to store transformed preview rows during --dry-run.',
+            ->addOption('resume', [
+                'boolean' => true,
+                'default' => true,
+                'help' => 'If true and --from-id=0, resume from checkpoint.',
             ]);
     }
 
@@ -55,8 +60,8 @@ class MigrateSysUsersCommand extends Command
         $batch = max(1, (int)$args->getOption('batch'));
         $fromId = max(0, (int)$args->getOption('from-id'));
         $maxRows = max(0, (int)$args->getOption('max-rows'));
-        $existingCsvPath = (string)$args->getOption('existing-csv');
-        $dryRunCsvPath = (string)$args->getOption('dry-run-csv');
+        $checkpointKey = (string)$args->getOption('checkpoint-key');
+        $resume = (bool)$args->getOption('resume');
 
         if (!is_file($configPath)) {
             $io->err("Migration config not found: {$configPath}");
@@ -69,6 +74,10 @@ class MigrateSysUsersCommand extends Command
             return static::CODE_ERROR;
         }
 
+        $supabaseApiUrl = rtrim((string)($cfg['target']['api_url'] ?? ''), '/');
+        $supabaseServiceRoleKey = (string)($cfg['target']['service_role_key'] ?? '');
+        $defaultAuthPassword = (string)($cfg['target']['default_auth_password'] ?? 'TempReset#2026');
+
         try {
             $legacy = $this->makeMysqlPdo($cfg['legacy']);
             $target = $this->makePgPdo($cfg['target']);
@@ -77,109 +86,45 @@ class MigrateSysUsersCommand extends Command
             return static::CODE_ERROR;
         }
 
-        $io->out(sprintf(
-            'Starting migration (dry-run=%s, batch=%d, from-id=%d)',
-            $dryRun ? 'yes' : 'no',
-            $batch,
-            $fromId
-        ));
-
-        $existingCsvDir = dirname($existingCsvPath);
-        if (!is_dir($existingCsvDir)) {
-            if (!mkdir($existingCsvDir, 0775, true) && !is_dir($existingCsvDir)) {
-                $io->err("Unable to create CSV log directory: {$existingCsvDir}");
-                return static::CODE_ERROR;
-            }
-        }
-        $csvHandle = fopen($existingCsvPath, 'ab');
-        if ($csvHandle === false) {
-            $io->err("Unable to open CSV log file: {$existingCsvPath}");
+        if (!$dryRun && ($supabaseApiUrl === '' || $supabaseServiceRoleKey === '')) {
+            $io->err('Missing Supabase Admin API config. Set target.api_url + target.service_role_key.');
             return static::CODE_ERROR;
-        }
-        if (filesize($existingCsvPath) === 0) {
-            fputcsv($csvHandle, [
-                'logged_at_utc',
-                'legacy_user_id',
-                'legacy_uid',
-                'email',
-                'auth_user_id',
-                'user_profile_id',
-                'reason',
-            ]);
-        }
-
-        $dryCsvDir = dirname($dryRunCsvPath);
-        if (!is_dir($dryCsvDir)) {
-            if (!mkdir($dryCsvDir, 0775, true) && !is_dir($dryCsvDir)) {
-                $io->err("Unable to create dry-run CSV directory: {$dryCsvDir}");
-                fclose($csvHandle);
-                return static::CODE_ERROR;
-            }
-        }
-        $dryCsvHandle = fopen($dryRunCsvPath, 'ab');
-        if ($dryCsvHandle === false) {
-            $io->err("Unable to open dry-run CSV file: {$dryRunCsvPath}");
-            fclose($csvHandle);
-            return static::CODE_ERROR;
-        }
-        if (filesize($dryRunCsvPath) === 0) {
-            fputcsv($dryCsvHandle, [
-                'logged_at_utc',
-                'legacy_user_id',
-                'legacy_uid',
-                'legacy_short_uid',
-                'email',
-                'mapped_app_role',
-                'mapped_onboarding_status',
-                'is_active',
-                'push_notifications_enabled',
-                'state',
-                'city',
-                'zip_code',
-                'full_name',
-                'practice_name',
-                'practice_address',
-                'phone',
-                'dob',
-                'stripe_account_id',
-                'stripe_onboarding_complete',
-                'created_at',
-                'updated_at',
-                'would_insert_patient',
-            ]);
         }
 
         if (!$dryRun) {
-            $target->exec("
-                CREATE TABLE IF NOT EXISTS public.migration_sys_users_map (
-                  legacy_user_id bigint PRIMARY KEY,
-                  legacy_uid text,
-                  legacy_email text,
-                  auth_user_id uuid UNIQUE,
-                  user_profile_id uuid,
-                  mapped_app_role text,
-                  migrated_at timestamptz NOT NULL DEFAULT now()
-                )
-            ");
+            $this->ensureCheckpointTable($target);
+            $this->ensureMapTable($target);
         }
+
+        $lastId = $fromId > 0 ? $fromId : 4294967295;
+        if (!$dryRun && $fromId === 0 && $resume) {
+            $cp = $this->getCheckpoint($target, $checkpointKey);
+            if ($cp !== null && $cp > 0) {
+                $lastId = $cp;
+            }
+        }
+
+        $io->out(sprintf(
+            'Phase A start (dry-run=%s, batch=%d, from-id=%d, checkpoint=%s)',
+            $dryRun ? 'yes' : 'no',
+            $batch,
+            $lastId,
+            $checkpointKey
+        ));
 
         $processed = 0;
         $migrated = 0;
         $skipped = 0;
-        $lastId = $fromId > 0 ? $fromId : 4294967295;
         $stopRequested = false;
 
         while (true) {
             $sql = "
                 SELECT
-                    su.id, su.uid, su.short_uid, su.name, su.mname, su.lname, su.description, su.email, su.password,
-                    su.type, su.state, su.zip, su.city, su.street, su.suite, su.phone, su.dob, su.gender, su.bname, su.ein,
-                    su.active, su.login_status, su.latitude, su.longitude, su.radius, su.score, su.photo_id,
-                    su.stripe_account_confirm, su.stripe_account, su.i_nine_id, su.ten_nintynine_id, su.amount, su.payment,
-                    su.payment_intent, su.receipt_url, su.tracers, su.tracers_sxo, su.is_test, su.enable_notifications, su.deleted,
-                    su.created, su.createdby, su.modified, su.modifiedby, su.show_in_map, su.show_most_review, su.last_status_change,
-                    su.custom_pay, su.md_id, su.steps, su.spa_work, su.sales_rep_status, su.treatment_type, su.provider_url,
-                    su.speak_spanish, su.branch_manager, su.filler_check,
+                    su.id, su.uid, su.short_uid, su.name, su.mname, su.lname, su.description, su.email,
+                    su.type, su.state, su.zip, su.city, su.street, su.suite, su.phone, su.dob,
+                    su.gender, su.bname, su.ein, su.active, su.login_status, su.latitude, su.longitude,
+                    su.radius, su.score, su.photo_id, su.stripe_account_confirm, su.stripe_account,
+                    su.enable_notifications, su.deleted, su.created, su.modified, su.steps,
                     COALESCE(cs.abv, cs.name, CAST(su.state AS CHAR)) AS state_text
                 FROM sys_users su
                 LEFT JOIN cat_states cs ON cs.id = su.state
@@ -217,6 +162,11 @@ class MigrateSysUsersCommand extends Command
                         continue;
                     }
 
+                    if (!$dryRun && $this->mapAlreadyMigrated($target, (int)$row['id'])) {
+                        $skipped++;
+                        continue;
+                    }
+
                     $fullName = $this->buildFullName($row['name'] ?? null, $row['mname'] ?? null, $row['lname'] ?? null);
                     $appRole = $this->mapRole((string)$row['type']);
                     $onboarding = $this->mapOnboardingStatus((string)($row['steps'] ?? ''));
@@ -228,67 +178,7 @@ class MigrateSysUsersCommand extends Command
                     $createdAt = $this->toTimestamp($row['created'] ?? null);
                     $updatedAt = $this->toTimestamp($row['modified'] ?? null) ?: $createdAt;
 
-                    $legacyMetaJson = json_encode([
-                        'legacy_user_id' => (int)$row['id'],
-                        'legacy_uid' => $this->asNullableText($row['uid'] ?? null),
-                        'legacy_short_uid' => $this->asNullableText($row['short_uid'] ?? null),
-                        'legacy_type' => $this->asNullableText($row['type'] ?? null),
-                        'legacy_login_status' => $this->asNullableText($row['login_status'] ?? null),
-                        'legacy_steps' => $this->asNullableText($row['steps'] ?? null),
-                        'legacy_gender' => $this->asNullableText($row['gender'] ?? null),
-                        'legacy_ein' => $this->asNullableText($row['ein'] ?? null),
-                        'legacy_score' => $row['score'],
-                        'legacy_photo_id' => $row['photo_id'],
-                        'legacy_i_nine_id' => $row['i_nine_id'],
-                        'legacy_ten_nintynine_id' => $row['ten_nintynine_id'],
-                        'legacy_amount' => $row['amount'],
-                        'legacy_payment' => $this->asNullableText($row['payment'] ?? null),
-                        'legacy_payment_intent' => $this->asNullableText($row['payment_intent'] ?? null),
-                        'legacy_receipt_url' => $this->asNullableText($row['receipt_url'] ?? null),
-                        'legacy_tracers' => $this->asNullableText($row['tracers'] ?? null),
-                        'legacy_tracers_sxo' => $this->asNullableText($row['tracers_sxo'] ?? null),
-                        'legacy_is_test' => $row['is_test'],
-                        'legacy_createdby' => $row['createdby'],
-                        'legacy_modifiedby' => $row['modifiedby'],
-                        'legacy_show_in_map' => $row['show_in_map'],
-                        'legacy_show_most_review' => $row['show_most_review'],
-                        'legacy_last_status_change' => $row['last_status_change'],
-                        'legacy_custom_pay' => $row['custom_pay'],
-                        'legacy_md_id' => $row['md_id'],
-                        'legacy_spa_work' => $row['spa_work'],
-                        'legacy_sales_rep_status' => $row['sales_rep_status'],
-                        'legacy_treatment_type' => $row['treatment_type'],
-                        'legacy_provider_url' => $row['provider_url'],
-                        'legacy_speak_spanish' => $row['speak_spanish'],
-                        'legacy_branch_manager' => $row['branch_manager'],
-                        'legacy_filler_check' => $row['filler_check'],
-                    ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-
                     if ($dryRun) {
-                        fputcsv($dryCsvHandle, [
-                            gmdate('c'),
-                            (int)$row['id'],
-                            $this->asNullableText($row['uid'] ?? null),
-                            $this->asNullableText($row['short_uid'] ?? null),
-                            $email,
-                            $appRole,
-                            $onboarding,
-                            $isActive ? 'true' : 'false',
-                            $pushEnabled ? 'true' : 'false',
-                            $this->asNullableText($row['state_text'] ?? null),
-                            $this->asNullableText($row['city'] ?? null),
-                            $this->asNumericText($row['zip'] ?? null),
-                            $fullName,
-                            $isProviderLike ? $this->asNullableText($row['bname'] ?? null) : null,
-                            $practiceAddress,
-                            $this->asNullableText($row['phone'] ?? null),
-                            $this->asDate($row['dob'] ?? null),
-                            $isProviderLike ? $this->asNullableText($row['stripe_account'] ?? null) : null,
-                            $isProviderLike && ((int)$row['stripe_account_confirm'] === 1) ? 'true' : 'false',
-                            $createdAt,
-                            $updatedAt,
-                            $appRole === 'patient' ? 'yes' : 'no',
-                        ]);
                         $migrated++;
                         if ($maxRows > 0 && $processed >= $maxRows) {
                             $stopRequested = true;
@@ -297,66 +187,56 @@ class MigrateSysUsersCommand extends Command
                         continue;
                     }
 
+                    $legacyMeta = [
+                        'legacy_user_id' => (int)$row['id'],
+                        'legacy_uid' => $this->asNullableText($row['uid'] ?? null),
+                        'legacy_short_uid' => $this->asNullableText($row['short_uid'] ?? null),
+                        'legacy_type' => $this->asNullableText($row['type'] ?? null),
+                        'legacy_login_status' => $this->asNullableText($row['login_status'] ?? null),
+                        'legacy_steps' => $this->asNullableText($row['steps'] ?? null),
+                        'legacy_gender' => $this->asNullableText($row['gender'] ?? null),
+                        'legacy_ein' => $this->asNullableText($row['ein'] ?? null),
+                        'legacy_score' => $row['score'] ?? null,
+                        'legacy_photo_id' => $row['photo_id'] ?? null,
+                    ];
+
+                    $this->createAuthUserViaApi($supabaseApiUrl, $supabaseServiceRoleKey, $email, $defaultAuthPassword, $legacyMeta);
+
                     $authRow = $target->prepare("SELECT id FROM auth.users WHERE lower(trim(email)) = :email LIMIT 1");
                     $authRow->execute([':email' => $email]);
                     $auth = $authRow->fetch(PDO::FETCH_ASSOC);
-
-                    if ($auth) {
-                        $authUserId = $auth['id'];
-                        $upd = $target->prepare(
-                            "UPDATE auth.users
-                             SET raw_user_meta_data = COALESCE(raw_user_meta_data, '{}'::jsonb) || :meta::jsonb,
-                                 updated_at = GREATEST(COALESCE(updated_at, 'epoch'::timestamptz), COALESCE(:updated_at::timestamptz, now())),
-                                 banned_until = :banned_until::timestamptz
-                             WHERE id = :id::uuid"
-                        );
-                        $upd->execute([
-                            ':meta' => $legacyMetaJson,
-                            ':updated_at' => $updatedAt,
-                            ':banned_until' => $bannedUntil,
-                            ':id' => $authUserId,
-                        ]);
-                    } else {
-                        $ins = $target->prepare(
-                            "INSERT INTO auth.users (
-                                id, aud, role, email, encrypted_password, email_confirmed_at,
-                                raw_app_meta_data, raw_user_meta_data, created_at, updated_at, banned_until
-                            ) VALUES (
-                                gen_random_uuid(), 'authenticated', 'authenticated', :email, NULL, now(),
-                                :app_meta::jsonb, :meta::jsonb,
-                                COALESCE(:created_at::timestamptz, now()),
-                                COALESCE(:updated_at::timestamptz, now()),
-                                :banned_until::timestamptz
-                            ) RETURNING id"
-                        );
-                        $ins->execute([
-                            ':email' => $email,
-                            ':app_meta' => json_encode(['provider' => 'email', 'providers' => ['email']]),
-                            ':meta' => $legacyMetaJson,
-                            ':created_at' => $createdAt,
-                            ':updated_at' => $updatedAt,
-                            ':banned_until' => $bannedUntil,
-                        ]);
-                        $authUserId = $ins->fetchColumn();
+                    if (!$auth) {
+                        throw new \RuntimeException('Auth user not found after Admin API create for email: ' . $email);
                     }
+                    $authUserId = (string)$auth['id'];
 
-                    $existingProfileStmt = $target->prepare(
-                        "SELECT id FROM public.user_profiles WHERE user_id = :user_id::uuid LIMIT 1"
+                    // keep auth user metadata healthy/consistent
+                    $upd = $target->prepare(
+                        "UPDATE auth.users
+                         SET raw_app_meta_data = COALESCE(raw_app_meta_data, '{}'::jsonb) || :app_meta::jsonb,
+                             instance_id = COALESCE(instance_id, '00000000-0000-0000-0000-000000000000'::uuid),
+                             encrypted_password = COALESCE(encrypted_password, crypt(gen_random_uuid()::text, gen_salt('bf'))),
+                             email_confirmed_at = COALESCE(email_confirmed_at, now()),
+                             updated_at = GREATEST(COALESCE(updated_at, 'epoch'::timestamptz), COALESCE(:updated_at::timestamptz, now())),
+                             banned_until = :banned_until::timestamptz
+                         WHERE id = :id::uuid"
                     );
+                    $upd->execute([
+                        ':app_meta' => json_encode(['provider' => 'email', 'providers' => ['email']]),
+                        ':updated_at' => $updatedAt,
+                        ':banned_until' => $bannedUntil,
+                        ':id' => $authUserId,
+                    ]);
+
+                    $this->ensureAuthIdentity($target, $authUserId, $email, $createdAt, $updatedAt);
+
+                    // create profile if missing (do NOT update if already exists)
+                    $existingProfileStmt = $target->prepare("SELECT id FROM public.user_profiles WHERE user_id = :user_id::uuid LIMIT 1");
                     $existingProfileStmt->execute([':user_id' => $authUserId]);
                     $existingProfile = $existingProfileStmt->fetch(PDO::FETCH_ASSOC);
 
                     if ($existingProfile) {
-                        $profileId = $existingProfile['id'];
-                        fputcsv($csvHandle, [
-                            gmdate('c'),
-                            (int)$row['id'],
-                            $this->asNullableText($row['uid'] ?? null),
-                            $email,
-                            $authUserId,
-                            $profileId,
-                            'user_profiles.user_id already exists; skipped update',
-                        ]);
+                        $profileId = (string)$existingProfile['id'];
                     } else {
                         $profileStmt = $target->prepare(
                             "INSERT INTO public.user_profiles (
@@ -366,8 +246,8 @@ class MigrateSysUsersCommand extends Command
                                 created_at, updated_at
                             ) VALUES (
                                 :user_id::uuid, :email, :full_name, :phone, :bio, :app_role, :onboarding_status, :account_flag,
-                            :is_active::boolean, :push_enabled::boolean, :state, :city, :zip_code, :practice_name, :practice_address,
-                            :latitude, :longitude, :radius, :stripe_account_id, :stripe_onboarding_complete::boolean,
+                                :is_active::boolean, :push_enabled::boolean, :state, :city, :zip_code, :practice_name, :practice_address,
+                                :latitude, :longitude, :radius, :stripe_account_id, :stripe_onboarding_complete::boolean,
                                 COALESCE(:created_at::timestamptz, now()),
                                 COALESCE(:updated_at::timestamptz, now())
                             )
@@ -397,7 +277,7 @@ class MigrateSysUsersCommand extends Command
                             ':created_at' => $createdAt,
                             ':updated_at' => $updatedAt,
                         ]);
-                        $profileId = $profileStmt->fetchColumn();
+                        $profileId = (string)$profileStmt->fetchColumn();
                     }
 
                     if ($appRole === 'patient') {
@@ -465,14 +345,13 @@ class MigrateSysUsersCommand extends Command
 
                 if (!$dryRun) {
                     $target->commit();
+                    $this->setCheckpoint($target, $checkpointKey, $lastId);
                 }
             } catch (Throwable $e) {
                 if (!$dryRun && $target->inTransaction()) {
                     $target->rollBack();
                 }
-                $io->err("Migration failed near legacy id={$lastId}: " . $e->getMessage());
-                fclose($csvHandle);
-                fclose($dryCsvHandle);
+                $io->err("Phase A failed near legacy id={$lastId}: " . $e->getMessage());
                 return static::CODE_ERROR;
             }
 
@@ -482,10 +361,142 @@ class MigrateSysUsersCommand extends Command
             }
         }
 
-        $io->success("Done. processed={$processed}, migrated={$migrated}, skipped={$skipped}, last_id={$lastId}");
-        fclose($csvHandle);
-        fclose($dryCsvHandle);
+        $io->success("Phase A done. processed={$processed}, migrated={$migrated}, skipped={$skipped}, last_id={$lastId}");
         return static::CODE_SUCCESS;
+    }
+
+    private function ensureCheckpointTable(PDO $target): void
+    {
+        $target->exec("
+            CREATE TABLE IF NOT EXISTS public.migration_checkpoints (
+              name text PRIMARY KEY,
+              last_legacy_id bigint NOT NULL,
+              updated_at timestamptz NOT NULL DEFAULT now()
+            )
+        ");
+    }
+
+    private function getCheckpoint(PDO $target, string $name): ?int
+    {
+        $stmt = $target->prepare("SELECT last_legacy_id FROM public.migration_checkpoints WHERE name = :name LIMIT 1");
+        $stmt->execute([':name' => $name]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row ? (int)$row['last_legacy_id'] : null;
+    }
+
+    private function setCheckpoint(PDO $target, string $name, int $lastLegacyId): void
+    {
+        $stmt = $target->prepare(
+            "INSERT INTO public.migration_checkpoints (name, last_legacy_id, updated_at)
+             VALUES (:name, :id, now())
+             ON CONFLICT (name) DO UPDATE SET last_legacy_id = EXCLUDED.last_legacy_id, updated_at = now()"
+        );
+        $stmt->execute([':name' => $name, ':id' => $lastLegacyId]);
+    }
+
+    private function ensureMapTable(PDO $target): void
+    {
+        $target->exec("
+            CREATE TABLE IF NOT EXISTS public.migration_sys_users_map (
+              legacy_user_id bigint PRIMARY KEY,
+              legacy_uid text,
+              legacy_email text,
+              auth_user_id uuid UNIQUE,
+              user_profile_id uuid,
+              mapped_app_role text,
+              migrated_at timestamptz NOT NULL DEFAULT now()
+            )
+        ");
+    }
+
+    private function mapAlreadyMigrated(PDO $target, int $legacyUserId): bool
+    {
+        $stmt = $target->prepare("SELECT 1 FROM public.migration_sys_users_map WHERE legacy_user_id = :id LIMIT 1");
+        $stmt->execute([':id' => $legacyUserId]);
+        return (bool)$stmt->fetchColumn();
+    }
+
+    private function ensureAuthIdentity(PDO $target, string $authUserId, string $email, ?string $createdAt, ?string $updatedAt): void
+    {
+        $identityData = json_encode([
+            'sub' => $authUserId,
+            'email' => $email,
+            'email_verified' => true,
+            'phone_verified' => false,
+        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+        $stmt = $target->prepare(
+            "INSERT INTO auth.identities (
+                id, user_id, identity_data, provider, provider_id, last_sign_in_at, created_at, updated_at
+            ) VALUES (
+                gen_random_uuid(), :user_id::uuid, :identity_data::jsonb, 'email', :provider_id, NULL,
+                COALESCE(:created_at::timestamptz, now()),
+                COALESCE(:updated_at::timestamptz, now())
+            )
+            ON CONFLICT (provider_id, provider) DO UPDATE
+            SET identity_data = EXCLUDED.identity_data,
+                updated_at = EXCLUDED.updated_at"
+        );
+
+        $stmt->execute([
+            ':user_id' => $authUserId,
+            ':provider_id' => $authUserId,
+            ':identity_data' => $identityData,
+            ':created_at' => $createdAt,
+            ':updated_at' => $updatedAt,
+        ]);
+    }
+
+    private function createAuthUserViaApi(string $supabaseApiUrl, string $serviceRoleKey, string $email, string $password, array $legacyMeta): void
+    {
+        $payload = [
+            'email' => $email,
+            'password' => $password,
+            'email_confirm' => true,
+            'app_metadata' => [
+                'provider' => 'email',
+                'providers' => ['email'],
+            ],
+            'user_metadata' => $legacyMeta,
+        ];
+
+        $ch = curl_init($supabaseApiUrl . '/auth/v1/admin/users');
+        if ($ch === false) {
+            throw new \RuntimeException('Unable to initialize curl for Supabase Admin API.');
+        }
+
+        curl_setopt_array($ch, [
+            CURLOPT_POST => true,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 30,
+            CURLOPT_HTTPHEADER => [
+                'apikey: ' . $serviceRoleKey,
+                'Authorization: Bearer ' . $serviceRoleKey,
+                'Content-Type: application/json',
+            ],
+            CURLOPT_POSTFIELDS => json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+        ]);
+
+        $body = curl_exec($ch);
+        $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curlErr = curl_error($ch);
+        curl_close($ch);
+
+        if ($body === false || $curlErr !== '') {
+            throw new \RuntimeException('Supabase Admin API create user failed: ' . $curlErr);
+        }
+
+        if ($httpCode >= 200 && $httpCode < 300) {
+            return;
+        }
+
+        $decoded = json_decode((string)$body, true);
+        $msg = is_array($decoded) ? strtolower((string)($decoded['msg'] ?? $decoded['message'] ?? '')) : '';
+        if (str_contains($msg, 'already') || str_contains($msg, 'exists') || str_contains($msg, 'registered')) {
+            return;
+        }
+
+        throw new \RuntimeException('Supabase Admin API create user failed [' . $httpCode . ']: ' . (string)$body);
     }
 
     private function makeMysqlPdo(array $cfg): PDO
