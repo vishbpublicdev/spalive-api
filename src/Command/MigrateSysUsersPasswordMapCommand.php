@@ -47,6 +47,10 @@ class MigrateSysUsersPasswordMapCommand extends Command
                 'default' => 'sys_users:password_map',
                 'help' => 'Checkpoint name used to persist last migrated legacy id.',
             ])
+            ->addOption('auth-checkpoint-key', [
+                'default' => 'sys_users:auth_profiles',
+                'help' => 'Auth/profile checkpoint name used to cap how far Phase B scans.',
+            ])
             ->addOption('resume', [
                 'boolean' => true,
                 'default' => true,
@@ -62,6 +66,7 @@ class MigrateSysUsersPasswordMapCommand extends Command
         $fromId = max(0, (int)$args->getOption('from-id'));
         $maxRows = max(0, (int)$args->getOption('max-rows'));
         $checkpointKey = (string)$args->getOption('checkpoint-key');
+        $authCheckpointKey = (string)$args->getOption('auth-checkpoint-key');
         $resume = (bool)$args->getOption('resume');
 
         if (!is_file($configPath)) {
@@ -96,6 +101,23 @@ class MigrateSysUsersPasswordMapCommand extends Command
             }
         }
 
+        // Cap lower scan boundary to where Phase A already created auth/profile rows.
+        // Since the query uses `su.id < :last_id`, and we iterate downward, adding:
+        //   AND su.id >= :auth_min_id
+        // ensures we never scan legacy ids lower than what auth/profile migration reached.
+        $authMinLegacyId = 0;
+        if (!$dryRun) {
+            try {
+                $authCp = $this->getCheckpoint($target, $authCheckpointKey);
+                if ($authCp !== null && $authCp > 0) {
+                    $authMinLegacyId = $authCp;
+                }
+            } catch (Throwable $e) {
+                // If checkpoint table/key is missing, fall back to no lower cap.
+                $authMinLegacyId = 0;
+            }
+        }
+
         $io->out(sprintf(
             'Phase B start (dry-run=%s, batch=%d, from-id=%d, checkpoint=%s)',
             $dryRun ? 'yes' : 'no',
@@ -115,6 +137,7 @@ class MigrateSysUsersPasswordMapCommand extends Command
                 FROM sys_users su
                 WHERE COALESCE(su.deleted, 0) = 0
                   AND su.id < :last_id
+                  AND su.id >= :auth_min_id
                   AND su.email IS NOT NULL
                   AND TRIM(su.email) <> ''
                   AND su.email LIKE '%@%'
@@ -126,6 +149,7 @@ class MigrateSysUsersPasswordMapCommand extends Command
 
             $stmt = $legacy->prepare($sql);
             $stmt->bindValue(':last_id', $lastId, PDO::PARAM_INT);
+            $stmt->bindValue(':auth_min_id', $authMinLegacyId, PDO::PARAM_INT);
             $stmt->bindValue(':batch', $batch, PDO::PARAM_INT);
             $stmt->execute();
             $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -143,6 +167,13 @@ class MigrateSysUsersPasswordMapCommand extends Command
                     $processed++;
                     $lastId = (int)$row['id'];
 
+                    // Stop after N sys_users candidates, even if they end up being skipped.
+                    // This makes --max-rows behave as "max candidates to examine".
+                    if ($maxRows > 0 && $processed >= $maxRows) {
+                        $stopRequested = true;
+                        break;
+                    }
+
                     $legacyUserId = (int)$row['id'];
                     $legacyHash = trim((string)$row['password']);
                     if ($legacyHash === '') {
@@ -152,10 +183,6 @@ class MigrateSysUsersPasswordMapCommand extends Command
 
                     if ($dryRun) {
                         $upserted++;
-                        if ($maxRows > 0 && $processed >= $maxRows) {
-                            $stopRequested = true;
-                            break;
-                        }
                         continue;
                     }
 
@@ -175,11 +202,6 @@ class MigrateSysUsersPasswordMapCommand extends Command
                     $authUserId = (string)$map['auth_user_id'];
                     $this->upsertLegacyPasswordMapping($target, $authUserId, $legacyHash, $legacyUserId);
                     $upserted++;
-
-                    if ($maxRows > 0 && $processed >= $maxRows) {
-                        $stopRequested = true;
-                        break;
-                    }
                 }
 
                 if (!$dryRun) {

@@ -221,7 +221,7 @@ class RollbackLastMigratedSysUsersCommand extends Command
         ]);
     }
 
-    private function toBool(mixed $value, bool $default): bool
+    private function toBool($value, bool $default): bool
     {
         if ($value === null) {
             return $default;

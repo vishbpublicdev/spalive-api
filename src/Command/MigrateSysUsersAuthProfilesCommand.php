@@ -103,6 +103,7 @@ class MigrateSysUsersAuthProfilesCommand extends Command
                 $lastId = $cp;
             }
         }
+        
 
         $io->out(sprintf(
             'Phase A start (dry-run=%s, batch=%d, from-id=%d, checkpoint=%s)',
@@ -492,7 +493,7 @@ class MigrateSysUsersAuthProfilesCommand extends Command
 
         $decoded = json_decode((string)$body, true);
         $msg = is_array($decoded) ? strtolower((string)($decoded['msg'] ?? $decoded['message'] ?? '')) : '';
-        if (str_contains($msg, 'already') || str_contains($msg, 'exists') || str_contains($msg, 'registered')) {
+        if (strpos($msg, 'already') !== false || strpos($msg, 'exists') !== false || strpos($msg, 'registered') !== false) {
             return;
         }
 
@@ -536,13 +537,19 @@ class MigrateSysUsersAuthProfilesCommand extends Command
 
     private function mapRole(string $legacyType): string
     {
-        return match ($legacyType) {
-            'patient', 'patient_mint' => 'patient',
-            'injector', 'gfe+ci', 'mint_injector', 'branch_injector', 'clinic', 'school' => 'provider',
-            'examiner' => 'medical_director',
-            'master', 'branch_manager', 'mint' => 'staff',
-            default => 'none',
-        };
+        if (in_array($legacyType, ['patient', 'patient_mint'], true)) {
+            return 'patient';
+        }
+        if (in_array($legacyType, ['injector', 'gfe+ci', 'mint_injector', 'branch_injector', 'clinic', 'school'], true)) {
+            return 'provider';
+        }
+        if ($legacyType === 'examiner') {
+            return 'medical_director';
+        }
+        if (in_array($legacyType, ['master', 'branch_manager', 'mint'], true)) {
+            return 'staff';
+        }
+        return 'none';
     }
 
     private function mapOnboardingStatus(string $steps): string
@@ -571,17 +578,21 @@ class MigrateSysUsersAuthProfilesCommand extends Command
 
     private function buildFullName(?string $name, ?string $mname, ?string $lname): ?string
     {
-        $parts = array_filter([trim((string)$name), trim((string)$mname), trim((string)$lname)], fn($v) => $v !== '');
+        $parts = array_filter([trim((string)$name), trim((string)$mname), trim((string)$lname)], function ($v) {
+            return $v !== '';
+        });
         return empty($parts) ? null : implode(' ', $parts);
     }
 
     private function joinAddress(?string $street, ?string $suite): ?string
     {
-        $parts = array_filter([trim((string)$street), trim((string)$suite)], fn($v) => $v !== '');
+        $parts = array_filter([trim((string)$street), trim((string)$suite)], function ($v) {
+            return $v !== '';
+        });
         return empty($parts) ? null : implode(', ', $parts);
     }
 
-    private function asNullableText(mixed $value): ?string
+    private function asNullableText($value): ?string
     {
         if ($value === null) {
             return null;
@@ -590,7 +601,7 @@ class MigrateSysUsersAuthProfilesCommand extends Command
         return $v === '' ? null : $v;
     }
 
-    private function asNumericText(mixed $value): ?string
+    private function asNumericText($value): ?string
     {
         if ($value === null) {
             return null;
@@ -602,7 +613,7 @@ class MigrateSysUsersAuthProfilesCommand extends Command
         return $v;
     }
 
-    private function asFloat(mixed $value): ?float
+    private function asFloat($value): ?float
     {
         if ($value === null || $value === '') {
             return null;
@@ -615,7 +626,7 @@ class MigrateSysUsersAuthProfilesCommand extends Command
         return $value ? 'true' : 'false';
     }
 
-    private function asDate(mixed $value): ?string
+    private function asDate($value): ?string
     {
         $v = trim((string)$value);
         if ($v === '' || $v === '0000-00-00') {
@@ -624,7 +635,7 @@ class MigrateSysUsersAuthProfilesCommand extends Command
         return $v;
     }
 
-    private function toTimestamp(mixed $value): ?string
+    private function toTimestamp($value): ?string
     {
         $v = trim((string)$value);
         if ($v === '' || $v === '0000-00-00 00:00:00') {
