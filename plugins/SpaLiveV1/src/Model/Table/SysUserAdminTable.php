@@ -46,6 +46,24 @@ class SysUserAdminTable extends Table
     }
 
     /**
+     * Whether this sys_users_admin row is an active eligible medical director assignee.
+     */
+    private function isEligibleDoctorAdmin(int $adminId): bool
+    {
+        if ($adminId <= 0) {
+            return false;
+        }
+
+        return $this->find()
+                ->where([
+                    'SysUserAdmin.id' => $adminId,
+                    'SysUserAdmin.user_type' => 'DOCTOR',
+                    'SysUserAdmin.deleted' => 0,
+                ])
+                ->count() > 0;
+    }
+
+    /**
      * Random active DOCTOR id for new injector md_id assignments (same distribution as getAssignedDoctorInjector).
      */
     public function pickBalancedDoctorIdForNewAssignment(): int
@@ -109,7 +127,8 @@ class SysUserAdminTable extends Table
     }
 
     /**
-     * Returns sys_users.md_id for this user. If zero, assigns a random active DOCTOR, persists to sys_users, and returns it.
+     * Returns sys_users.md_id for this user when it points to an active DOCTOR admin; otherwise assigns
+     * a random active DOCTOR (including replacing stale/non-DOCTOR/deleted admins), persists to sys_users, and returns it.
      * Used for injectors (e.g. treatments: same value as data_treatment.assigned_doctor via getRandomDoctor).
      *
      * @param int $id sys_users.id
@@ -131,9 +150,9 @@ class SysUserAdminTable extends Table
             return 0;
         }
 
-        $mdId = (int)$row['md_id'];
-        if ($mdId > 0) {
-            return $mdId;
+        $storedMd = (int)$row['md_id'];
+        if ($storedMd > 0 && $this->isEligibleDoctorAdmin($storedMd)) {
+            return $storedMd;
         }
 
         $newMd = $this->pickRandomEligibleDoctorId();
@@ -141,11 +160,20 @@ class SysUserAdminTable extends Table
             return 0;
         }
 
-        // Only set when still unassigned (avoids overwriting a concurrent assignment).
-        $upd = $this->getConnection()->execute(
-            'UPDATE sys_users SET md_id = ? WHERE id = ? AND deleted = 0 AND IFNULL(md_id, 0) = 0',
-            [$newMd, $id]
-        );
+        // Unassigned: only set when still zero (avoids overwriting a concurrent assignment).
+        // Stale md_id: replace only while row still holds the same stored value (avoids clobbering a concurrent fix).
+        if ($storedMd <= 0) {
+            $upd = $this->getConnection()->execute(
+                'UPDATE sys_users SET md_id = ? WHERE id = ? AND deleted = 0 AND IFNULL(md_id, 0) = 0',
+                [$newMd, $id]
+            );
+        } else {
+            $upd = $this->getConnection()->execute(
+                'UPDATE sys_users SET md_id = ? WHERE id = ? AND deleted = 0 AND md_id = ?',
+                [$newMd, $id, $storedMd]
+            );
+        }
+
         if ($upd->rowCount() > 0) {
             return $newMd;
         }
@@ -155,7 +183,12 @@ class SysUserAdminTable extends Table
             [$id]
         );
         $rowAfter = $stmt->fetch('assoc');
+        if ($rowAfter === false) {
+            return 0;
+        }
 
-        return $rowAfter === false ? 0 : (int)$rowAfter['md_id'];
+        $afterMd = (int)$rowAfter['md_id'];
+
+        return $this->isEligibleDoctorAdmin($afterMd) ? $afterMd : 0;
     }
 }
