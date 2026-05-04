@@ -129,6 +129,25 @@ class PaymentsController extends AppPluginController{
         return $sum > 0 ? $sum : (int)$headerAmountCents;
     }
 
+    private function sanitizePurchasePromoCode(string $promoCode): string
+    {
+        return strtoupper(trim($promoCode));
+    }
+
+    private function isAllPromoAllowedForCategory($entCode, $category, $courseCategories): bool
+    {
+        if (empty($entCode) || $entCode->category !== 'ALL') {
+            return true;
+        }
+
+        $is_all_99 = ($entCode->type == 'PERCENTAGE' && (int)$entCode->discount == 99);
+        if ($is_all_99) {
+            return true;
+        }
+
+        return in_array($category, $courseCategories, true);
+    }
+
 	public function initialize() : void{
         parent::initialize();
         date_default_timezone_set("America/Chicago");
@@ -513,6 +532,9 @@ class PaymentsController extends AppPluginController{
         $purchaseAmountForPromo = $this->purchaseMerchandiseSubtotalForPromo($_ent_purchases, $ent_purchase->amount);
 
         $code = strtoupper(trim(get('promo_code', '')));
+        if (!$isSingleCoursePurchase) {
+            $code = $this->sanitizePurchasePromoCode($code);
+        }
         $this->loadModel('SpaLiveV1.DataCodeEc');
         $ent_promo = $this->DataCodeEc->find()->last();
 
@@ -869,6 +891,12 @@ class PaymentsController extends AppPluginController{
         if (!empty($ent_codes)) {
 
             if ($ent_codes->category != 'ALL' && $ent_codes->category != $category) {
+                $this->set('code_valid', false);
+                $this->set('stripe_fee', in_array($category, $courseCategoriesNoStripePass, true) ? 0 : intval($subtotal * 0.0315));
+                return $subtotal;
+            }
+
+            if (!$this->isAllPromoAllowedForCategory($ent_codes, $category, $courseCategoriesNoStripePass)) {
                 $this->set('code_valid', false);
                 $this->set('stripe_fee', in_array($category, $courseCategoriesNoStripePass, true) ? 0 : intval($subtotal * 0.0315));
                 return $subtotal;
@@ -3872,6 +3900,7 @@ class PaymentsController extends AppPluginController{
         }
        
         $code = strtoupper(trim(get('promo_code', '')));
+        $code = $this->sanitizePurchasePromoCode($code);
         $this->loadModel('SpaLiveV1.DataCodeEc');
         $ent_promo = $this->DataCodeEc->find()->last();
 
