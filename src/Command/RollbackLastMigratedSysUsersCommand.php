@@ -39,6 +39,11 @@ class RollbackLastMigratedSysUsersCommand extends Command
             ->addOption('since', [
                 'default' => '',
                 'help' => 'Only delete rows with migrated_at >= this timestamp (e.g. 2026-04-27 or 2026-04-27T00:00:00Z).',
+            ])
+            ->addOption('no-sync-checkpoints', [
+                'boolean' => true,
+                'default' => false,
+                'help' => 'If set, do not realign migration_checkpoints after rollback (not recommended for ASC migrate).',
             ]);
     }
 
@@ -48,6 +53,7 @@ class RollbackLastMigratedSysUsersCommand extends Command
         $dryRun = $this->toBool($args->getOption('dry-run'), true);
         $count = max(1, (int)$args->getOption('count'));
         $since = trim((string)$args->getOption('since'));
+        $noSyncCheckpoints = (bool)$args->getOption('no-sync-checkpoints');
 
         if (!is_file($configPath)) {
             $io->err("Migration config not found: {$configPath}");
@@ -121,6 +127,11 @@ class RollbackLastMigratedSysUsersCommand extends Command
             return static::CODE_SUCCESS;
         }
 
+        $smallestLegacyRolled = PHP_INT_MAX;
+        foreach ($rows as $r0) {
+            $smallestLegacyRolled = min($smallestLegacyRolled, (int)$r0['legacy_user_id']);
+        }
+
         $deleted = 0;
         foreach ($rows as $r) {
             $legacyUserId = (int)$r['legacy_user_id'];
@@ -158,8 +169,60 @@ class RollbackLastMigratedSysUsersCommand extends Command
             }
         }
 
+        if (!$noSyncCheckpoints) {
+            try {
+                $minRolled = $smallestLegacyRolled !== PHP_INT_MAX ? $smallestLegacyRolled : null;
+                $this->syncCheckpointsAfterRollback($target, $io, $minRolled);
+            } catch (Throwable $e) {
+                $io->err('Checkpoint sync failed (map may be inconsistent with resume): ' . $e->getMessage());
+                return static::CODE_ERROR;
+            }
+        }
+
         $io->success("Rollback complete. Deleted={$deleted}");
         return static::CODE_SUCCESS;
+    }
+
+    private function ensureCheckpointTable(PDO $target): void
+    {
+        $target->exec("
+            CREATE TABLE IF NOT EXISTS public.migration_checkpoints (
+              name text PRIMARY KEY,
+              last_legacy_id bigint NOT NULL,
+              updated_at timestamptz NOT NULL DEFAULT now()
+            )
+        ");
+    }
+
+    private function setCheckpoint(PDO $target, string $name, int $lastLegacyId): void
+    {
+        $stmt = $target->prepare(
+            "INSERT INTO public.migration_checkpoints (name, last_legacy_id, updated_at)
+             VALUES (:name, :id, now())
+             ON CONFLICT (name) DO UPDATE SET last_legacy_id = EXCLUDED.last_legacy_id, updated_at = now()"
+        );
+        $stmt->execute([':name' => $name, ':id' => $lastLegacyId]);
+    }
+
+    /**
+     * ASC Phase A resumes with legacy id > checkpoint. Rolling back removes map rows whose legacy ids are
+     * often *below* MAX(remaining map). Setting checkpoint to MAX(map) would skip those ids forever.
+     * Rewind both cursors to (smallest rolled legacy id - 1) so the next run can see them again.
+     */
+    private function syncCheckpointsAfterRollback(PDO $target, ConsoleIo $io, ?int $smallestLegacyRolled): void
+    {
+        $this->ensureCheckpointTable($target);
+        if ($smallestLegacyRolled === null || $smallestLegacyRolled < 1) {
+            return;
+        }
+        $rewindTo = max(0, $smallestLegacyRolled - 1);
+        $this->setCheckpoint($target, 'sys_users:auth_profiles', $rewindTo);
+        $this->setCheckpoint($target, 'sys_users:password_map', $rewindTo);
+        $io->out(sprintf(
+            'Synced migration_checkpoints (auth_profiles + password_map) to last_legacy_id=%d (rollback rewind; smallest rolled legacy_user_id=%d).',
+            $rewindTo,
+            $smallestLegacyRolled
+        ));
     }
 
     private function deleteAuthUserViaApi(string $supabaseApiUrl, string $serviceRoleKey, string $userId): void

@@ -36,11 +36,11 @@ class MigrateSysUsersAuthProfilesCommand extends Command
             ])
             ->addOption('from-id', [
                 'default' => 0,
-                'help' => 'For DESC order: start from legacy id < from-id (0 = resume from checkpoint if enabled).',
+                'help' => 'For ASC order: start from legacy id > from-id (0 = resume from checkpoint if enabled).',
             ])
             ->addOption('max-rows', [
                 'default' => 0,
-                'help' => 'Stop after N rows (0 means no limit).',
+                'help' => 'Stop after N legacy rows examined per run incl. skips (0 = no limit).',
             ])
             ->addOption('checkpoint-key', [
                 'default' => 'sys_users:auth_profiles',
@@ -96,8 +96,9 @@ class MigrateSysUsersAuthProfilesCommand extends Command
             $this->ensureMapTable($target);
         }
 
-        $lastId = $fromId > 0 ? $fromId : 4294967295;
-        if (!$dryRun && $fromId === 0 && $resume) {
+        $lastId = $fromId > 0 ? $fromId : 0;
+        // Resume cursor must apply in dry-run too; otherwise scans always start from 0 and look "wrong".
+        if ($fromId === 0 && $resume) {
             $cp = $this->getCheckpoint($target, $checkpointKey);
             if ($cp !== null && $cp > 0) {
                 $lastId = $cp;
@@ -130,11 +131,11 @@ class MigrateSysUsersAuthProfilesCommand extends Command
                 FROM sys_users su
                 LEFT JOIN cat_states cs ON cs.id = su.state
                 WHERE COALESCE(su.deleted, 0) = 0
-                  AND su.id < :last_id
+                  AND su.id > :last_id
                   AND su.email IS NOT NULL
                   AND TRIM(su.email) <> ''
                   AND su.email LIKE '%@%'
-                ORDER BY su.id DESC
+                ORDER BY su.id ASC
                 LIMIT :batch
             ";
 
@@ -157,17 +158,27 @@ class MigrateSysUsersAuthProfilesCommand extends Command
                     $processed++;
                     $lastId = (int)$row['id'];
 
-                    $email = strtolower(trim((string)$row['email']));
+                    $email = $this->normalizeEmailForAuth((string)$row['email']);
                     if ($email === '' || strpos($email, '@') === false) {
                         $skipped++;
-                        continue;
-                    }
-
-                    if (!$dryRun && $this->mapAlreadyMigrated($target, (int)$row['id'])) {
+                        $io->out(sprintf(
+                            'Skipping legacy_user_id=%d: missing or invalid email (empty or no @ after normalize)',
+                            (int)$row['id']
+                        ));
+                    } elseif (!$this->isRFC5322LooseEmail($email)) {
                         $skipped++;
-                        continue;
-                    }
-
+                        $io->warning(sprintf(
+                            'Skipping legacy_user_id=%d: email rejected by strict validation (Supabase would return invalid format): %s',
+                            (int)$row['id'],
+                            $email
+                        ));
+                    } elseif ($this->mapAlreadyMigrated($target, (int)$row['id'])) {
+                        $skipped++;
+                        $io->out(sprintf(
+                            'Skipping legacy_user_id=%d: already in migration_sys_users_map',
+                            (int)$row['id']
+                        ));
+                    } else {
                     $fullName = $this->buildFullName($row['name'] ?? null, $row['mname'] ?? null, $row['lname'] ?? null);
                     $appRole = $this->mapRole((string)$row['type']);
                     $onboarding = $this->mapOnboardingStatus((string)($row['steps'] ?? ''));
@@ -181,12 +192,8 @@ class MigrateSysUsersAuthProfilesCommand extends Command
 
                     if ($dryRun) {
                         $migrated++;
-                        if ($maxRows > 0 && $processed >= $maxRows) {
-                            $stopRequested = true;
-                            break;
-                        }
-                        continue;
-                    }
+                        $io->out(sprintf('Dry-run: would migrate legacy_user_id=%d', (int)$row['id']));
+                    } else {
 
                     $legacyMeta = [
                         'legacy_user_id' => (int)$row['id'],
@@ -338,6 +345,11 @@ class MigrateSysUsersAuthProfilesCommand extends Command
                     ]);
 
                     $migrated++;
+                    }
+
+                    }
+
+                    // Honor --max-rows after each examined row (skips included).
                     if ($maxRows > 0 && $processed >= $maxRows) {
                         $stopRequested = true;
                         break;
@@ -356,13 +368,13 @@ class MigrateSysUsersAuthProfilesCommand extends Command
                 return static::CODE_ERROR;
             }
 
-            $io->out("Processed={$processed}, migrated={$migrated}, skipped={$skipped}, last_id={$lastId}");
+            $io->out("Processed={$processed}, migrated={$migrated}, skipped={$skipped}, checkpoint_id={$lastId}");
             if ($stopRequested) {
                 break;
             }
         }
 
-        $io->success("Phase A done. processed={$processed}, migrated={$migrated}, skipped={$skipped}, last_id={$lastId}");
+        $io->success("Phase A done. processed={$processed}, migrated={$migrated}, skipped={$skipped}, checkpoint_id={$lastId}");
         return static::CODE_SUCCESS;
     }
 
@@ -643,6 +655,24 @@ class MigrateSysUsersAuthProfilesCommand extends Command
         }
         $ts = strtotime($v);
         return $ts === false ? null : gmdate('Y-m-d H:i:sP', $ts);
+    }
+
+    /**
+     * Trim + lowercase; strip chars that commonly break Auth API validation while still slipping past SQL LIKE checks.
+     */
+    private function normalizeEmailForAuth(string $raw): string
+    {
+        $email = strtolower(trim(str_replace(["\0", "\r", "\n", "\x0c"], '', $raw)));
+        return preg_replace('/\x{00A0}/u', '', $email) ?? $email;
+    }
+
+    /** Aligns roughly with PHP/Supabase-style validation — stricter than "contains @". */
+    private function isRFC5322LooseEmail(string $email): bool
+    {
+        if (strlen($email) > 254) {
+            return false;
+        }
+        return filter_var($email, FILTER_VALIDATE_EMAIL) !== false;
     }
 }
 

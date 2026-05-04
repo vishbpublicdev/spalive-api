@@ -37,7 +37,7 @@ class MigrateSysUsersPasswordMapCommand extends Command
             ])
             ->addOption('from-id', [
                 'default' => 0,
-                'help' => 'For DESC order: start from legacy id < from-id (0 = resume from checkpoint if enabled).',
+                'help' => 'For ASC order: start from legacy id > from-id (0 = resume from checkpoint if enabled).',
             ])
             ->addOption('max-rows', [
                 'default' => 0,
@@ -49,7 +49,7 @@ class MigrateSysUsersPasswordMapCommand extends Command
             ])
             ->addOption('auth-checkpoint-key', [
                 'default' => 'sys_users:auth_profiles',
-                'help' => 'Auth/profile checkpoint name used to cap how far Phase B scans.',
+                'help' => 'Auth/profile checkpoint name used as upper bound (max legacy id already processed by Phase A).',
             ])
             ->addOption('resume', [
                 'boolean' => true,
@@ -93,28 +93,35 @@ class MigrateSysUsersPasswordMapCommand extends Command
             $this->ensureLegacyPasswordTable($target);
         }
 
-        $lastId = $fromId > 0 ? $fromId : 4294967295;
-        if (!$dryRun && $fromId === 0 && $resume) {
+        $lastId = $fromId > 0 ? $fromId : 0;
+        // Resume cursor must apply in dry-run too.
+        if ($fromId === 0 && $resume) {
             $cp = $this->getCheckpoint($target, $checkpointKey);
             if ($cp !== null && $cp > 0) {
                 $lastId = $cp;
             }
         }
 
-        // Cap lower scan boundary to where Phase A already created auth/profile rows.
-        // Since the query uses `su.id < :last_id`, and we iterate downward, adding:
-        //   AND su.id >= :auth_min_id
-        // ensures we never scan legacy ids lower than what auth/profile migration reached.
-        $authMinLegacyId = 0;
+        // Upper bound for legacy id scan: highest legacy row that has a map entry (Phase A output).
+        // Do NOT use sys_users:auth_profiles checkpoint here — after rollback that cursor can be lowered
+        // while higher map rows still exist; the old checkpoint-as-ceiling would hide missing map rows below it.
+        $authMaxLegacyId = 0;
         if (!$dryRun) {
             try {
-                $authCp = $this->getCheckpoint($target, $authCheckpointKey);
-                if ($authCp !== null && $authCp > 0) {
-                    $authMinLegacyId = $authCp;
-                }
+                $mx = $target->query('SELECT COALESCE(MAX(legacy_user_id), 0) FROM public.migration_sys_users_map');
+                $authMaxLegacyId = (int)$mx->fetchColumn();
             } catch (Throwable $e) {
-                // If checkpoint table/key is missing, fall back to no lower cap.
-                $authMinLegacyId = 0;
+                $authMaxLegacyId = 0;
+            }
+            if ($authMaxLegacyId === 0) {
+                try {
+                    $authCp = $this->getCheckpoint($target, $authCheckpointKey);
+                    if ($authCp !== null && $authCp > 0) {
+                        $authMaxLegacyId = $authCp;
+                    }
+                } catch (Throwable $e2) {
+                    $authMaxLegacyId = 0;
+                }
             }
         }
 
@@ -136,20 +143,20 @@ class MigrateSysUsersPasswordMapCommand extends Command
                 SELECT su.id, su.email, su.password
                 FROM sys_users su
                 WHERE COALESCE(su.deleted, 0) = 0
-                  AND su.id < :last_id
-                  AND su.id >= :auth_min_id
+                  AND su.id > :last_id
                   AND su.email IS NOT NULL
                   AND TRIM(su.email) <> ''
                   AND su.email LIKE '%@%'
                   AND su.password IS NOT NULL
                   AND TRIM(su.password) <> ''
-                ORDER BY su.id DESC
+                  AND (:auth_max_id <= 0 OR su.id <= :auth_max_id)
+                ORDER BY su.id ASC
                 LIMIT :batch
             ";
 
             $stmt = $legacy->prepare($sql);
             $stmt->bindValue(':last_id', $lastId, PDO::PARAM_INT);
-            $stmt->bindValue(':auth_min_id', $authMinLegacyId, PDO::PARAM_INT);
+            $stmt->bindValue(':auth_max_id', $authMaxLegacyId, PDO::PARAM_INT);
             $stmt->bindValue(':batch', $batch, PDO::PARAM_INT);
             $stmt->execute();
             $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -167,41 +174,44 @@ class MigrateSysUsersPasswordMapCommand extends Command
                     $processed++;
                     $lastId = (int)$row['id'];
 
-                    // Stop after N sys_users candidates, even if they end up being skipped.
-                    // This makes --max-rows behave as "max candidates to examine".
-                    if ($maxRows > 0 && $processed >= $maxRows) {
-                        $stopRequested = true;
-                        break;
-                    }
-
                     $legacyUserId = (int)$row['id'];
                     $legacyHash = trim((string)$row['password']);
                     if ($legacyHash === '') {
                         $skipped++;
-                        continue;
+                        $io->out(sprintf(
+                            'Skipping legacy_user_id=%d: empty password in legacy sys_users',
+                            $legacyUserId
+                        ));
+                    } else {
+                        $mapStmt = $target->prepare(
+                            "SELECT auth_user_id
+                             FROM public.migration_sys_users_map
+                             WHERE legacy_user_id = :legacy_user_id
+                             LIMIT 1"
+                        );
+                        $mapStmt->execute([':legacy_user_id' => $legacyUserId]);
+                        $map = $mapStmt->fetch(PDO::FETCH_ASSOC);
+                        if (!$map || empty($map['auth_user_id'])) {
+                            $skipped++;
+                            $io->out(sprintf(
+                                'Skipping legacy_user_id=%d: no migration_sys_users_map.auth_user_id (complete Phase A for this legacy id first)',
+                                $legacyUserId
+                            ));
+                        } elseif ($dryRun) {
+                            $upserted++;
+                            $io->out(sprintf('Dry-run: would upsert legacy_password_migration for legacy_user_id=%d', $legacyUserId));
+                        } else {
+                            $authUserId = (string)$map['auth_user_id'];
+                            $this->upsertLegacyPasswordMapping($target, $authUserId, $legacyHash, $legacyUserId);
+                            $upserted++;
+                        }
                     }
 
-                    if ($dryRun) {
-                        $upserted++;
-                        continue;
+                    // Count as "examined" after hash / map / upsert or skip; then honor max-rows.
+                    if ($maxRows > 0 && $processed >= $maxRows) {
+                        $stopRequested = true;
+                        break;
                     }
-
-                    $mapStmt = $target->prepare(
-                        "SELECT auth_user_id
-                         FROM public.migration_sys_users_map
-                         WHERE legacy_user_id = :legacy_user_id
-                         LIMIT 1"
-                    );
-                    $mapStmt->execute([':legacy_user_id' => $legacyUserId]);
-                    $map = $mapStmt->fetch(PDO::FETCH_ASSOC);
-                    if (!$map || empty($map['auth_user_id'])) {
-                        $skipped++;
-                        continue;
-                    }
-
-                    $authUserId = (string)$map['auth_user_id'];
-                    $this->upsertLegacyPasswordMapping($target, $authUserId, $legacyHash, $legacyUserId);
-                    $upserted++;
                 }
 
                 if (!$dryRun) {
@@ -216,13 +226,13 @@ class MigrateSysUsersPasswordMapCommand extends Command
                 return static::CODE_ERROR;
             }
 
-            $io->out("Processed={$processed}, upserted={$upserted}, skipped={$skipped}, last_id={$lastId}");
+            $io->out("Processed={$processed}, upserted={$upserted}, skipped={$skipped}, checkpoint_id={$lastId}");
             if ($stopRequested) {
                 break;
             }
         }
 
-        $io->success("Phase B done. processed={$processed}, upserted={$upserted}, skipped={$skipped}, last_id={$lastId}");
+        $io->success("Phase B done. processed={$processed}, upserted={$upserted}, skipped={$skipped}, checkpoint_id={$lastId}");
         return static::CODE_SUCCESS;
     }
 
