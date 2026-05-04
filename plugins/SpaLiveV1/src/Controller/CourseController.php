@@ -226,13 +226,14 @@ class CourseController extends AppPluginController {
         $this->loadModel('SpaLiveV1.CatProducts');
         $data_trainings = [];
 
-        // valida si hay stock de fillers y si hay stock lo agrega a la lista
+        // valida stock de fillers y prerrequisitos (level 1 + level 2 completados)
         $fillers = $this->CatProducts->find()->where(['CatProducts.id' => 178, 'CatProducts.deleted' => 0, 'CatProducts.stock' => 1])->first();
-        if(!empty($fillers)){
+        $hasBasicAndAdvancedCourse = CourseController::validateBasicAndAdvancedTraining($this);
+        if(!empty($fillers) && $hasBasicAndAdvancedCourse){
             $data_trainings[] = [
                 'training_id' => 0,
                 'treatment_id' => 0,
-                'name' => 'Foundations in Aesthetic Filler Techniques',
+                'name' => 'Filler Course Level 1',
                 'price' => $fillers->unit_price / 100,
                 'cross_price' => $fillers->unit_price / 100,
                 'action' => 'Login____info_advanced_level_three'
@@ -285,6 +286,61 @@ class CourseController extends AppPluginController {
         if(!empty($user_course_basic)) return true;
 
         return false;
+    }
+
+    public static function validateBasicAndAdvancedTraining($ref) {
+        $ref->loadModel('SpaLiveV1.DataTrainings');
+        $ref->loadModel('SpaLiveV1.DataCourses');
+
+        $level1 = $ref->DataTrainings->find()
+            ->join(['Cat' => ['table' => 'cat_trainings', 'type' => 'INNER', 'conditions' => 'Cat.id = DataTrainings.training_id']])
+            ->where([
+                'DataTrainings.user_id' => USER_ID,
+                'DataTrainings.deleted' => 0,
+                'DataTrainings.attended' => 1,
+                'Cat.level IN' => array('LEVEL 1','MYSPALIVE_S_HYBRID_TOX_FILLER_COURSE','MYSPALIVES_HYBRID_TOX_FILLER_COURSE'),
+                'Cat.deleted' => 0
+            ])
+            ->first();
+
+        $hasBasic = !empty($level1);
+        if(!$hasBasic){
+            $user_course_basic = $ref->DataCourses->find()->select(['CatCourses.type'])->join([
+                'CatCourses' => ['table' => 'cat_courses', 'type' => 'INNER', 'conditions' => 'CatCourses.id = DataCourses.course_id'],
+            ])->where([
+                'CatCourses.type IN' => array('NEUROTOXINS BASIC', 'BOTH NEUROTOXINS'),
+                'DataCourses.user_id' => USER_ID,
+                'DataCourses.deleted' => 0,
+                'DataCourses.status' => 'DONE'
+            ])->first();
+            $hasBasic = !empty($user_course_basic);
+        }
+
+        $level2 = $ref->DataTrainings->find()
+            ->join(['Cat' => ['table' => 'cat_trainings', 'type' => 'INNER', 'conditions' => 'Cat.id = DataTrainings.training_id']])
+            ->where([
+                'DataTrainings.user_id' => USER_ID,
+                'DataTrainings.deleted' => 0,
+                'DataTrainings.attended' => 1,
+                'Cat.level' => 'LEVEL 2',
+                'Cat.deleted' => 0
+            ])
+            ->first();
+
+        $hasAdvanced = !empty($level2);
+        if(!$hasAdvanced){
+            $user_course_advanced = $ref->DataCourses->find()->select(['CatCourses.type'])->join([
+                'CatCourses' => ['table' => 'cat_courses', 'type' => 'INNER', 'conditions' => 'CatCourses.id = DataCourses.course_id'],
+            ])->where([
+                'CatCourses.type IN' => array('NEUROTOXINS ADVANCED', 'BOTH NEUROTOXINS'),
+                'DataCourses.user_id' => USER_ID,
+                'DataCourses.deleted' => 0,
+                'DataCourses.status' => 'DONE'
+            ])->first();
+            $hasAdvanced = !empty($user_course_advanced);
+        }
+
+        return $hasBasic && $hasAdvanced;
     }
 
     public function licence_types(){
@@ -2172,7 +2228,11 @@ class CourseController extends AppPluginController {
                                         ->where($_where)
                                         ->first();
 
-        if(Count($ent_training) > 0 || !empty($ent_training_adv) || !empty($ent_training_dynamic || !empty($ent_training_fillers))){
+        $this->loadModel('SpaLiveV1.CatProducts');
+        $fillers_product_available = $this->CatProducts->find()->where(['CatProducts.id' => 178, 'CatProducts.deleted' => 0, 'CatProducts.stock' => 1])->first();
+        $offer_fillers_ot_course = !empty($fillers_product_available) && CourseController::validateBasicAndAdvancedTraining($this);
+
+        if (count($ent_training) > 0 || !empty($ent_training_adv) || count($ent_training_dynamic) > 0 || !empty($ent_training_fillers) || $offer_fillers_ot_course) {
 
             $res = array();
             $res2 = array();
@@ -2813,9 +2873,9 @@ class CourseController extends AppPluginController {
                         
             }
 
-            if ($ent_training_fillers) {
+            if ($offer_fillers_ot_course || !empty($ent_training_fillers)) {
                 $arr_other_courses_list[] = [
-                    'title' => 'Fillers',
+                    'title' => 'Filler Course Level 1',
                     'status' => 'BUY',
                     'type' => 'FILLER',
                     'course_type_id' => 0

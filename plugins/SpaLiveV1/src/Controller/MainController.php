@@ -24047,9 +24047,11 @@ class MainController extends AppPluginController {
         }
 
 
-        // valida si hay stock de fillers y si hay stock lo agrega a la lista
+        // valida stock de fillers y prerrequisitos (level 1 + level 2 completados)
         $fillers = $this->CatProducts->find()->where(['CatProducts.id' => 178, 'CatProducts.deleted' => 0, 'CatProducts.stock' => 1])->first();
-        $this->set("show_buy_button_level_3_fillers", empty($fillers) ? false : $show_buy_button_level_3_fillers);
+        $hasBasicAndAdvancedCourse = CourseController::validateBasicAndAdvancedTraining($this);
+        $canShowBuyButtonLevel3Fillers = !empty($fillers) && $hasBasicAndAdvancedCourse && $show_buy_button_level_3_fillers;
+        $this->set("show_buy_button_level_3_fillers", $canShowBuyButtonLevel3Fillers);
 
 
         $this->set("show_buy_button_basic", $show_buy_button_basic);

@@ -33,7 +33,7 @@ class LoginController extends AppPluginController{
 
     private $register_total = 89500;
     private $training_advanced = 89500;
-    private $level_3_fillers = 150000;//level 3 fillers 
+    private $level_3_fillers = 149500;//level 3 fillers 
     private $level_3_medical = 99500;//level 3 medical
     private $level_1_1 = 19900;//level
     private $total_subscriptionmsl = 3995;
@@ -4449,19 +4449,19 @@ class LoginController extends AppPluginController{
         $deferred_offer_id = isset($Partially->deferred_offers['level_3']) && !empty($Partially->deferred_offers['level_3']) ? $Partially->deferred_offers['level_3'] : null;
         $this->set('installments_deferred', !empty($deferred_offer_id) ? true : false);
 
-        $this->set('title_option', 'Foundations in Aesthetic Filler Techniques $' . $training_amount);
+        $this->set('title_option', 'Filler Course Level 1 - $' . $training_amount);
         $this->set('training_amount', $training_amount);
         $this->set('training_amount_installments', number_format($instNotCrossCents / 100, 2, '.', ''));
         $this->set('stripe_fee', number_format($stripe_fee, 2, '.', ''));
         $this->set('total', number_format($training_amount, 2, '.', ''));
         $this->set('image', 'https://blog.myspalive.com/wp-content/uploads/2024/01/level3filler.png');
-        $this->set('text', '<p>This comprehensive one-day course, priced at $' . number_format($pifNotCrossCents / 100, 2, '.', '') . ', is meticulously designed for licensed medical professionals seeking to master the art of cosmetic injections, specifically focusing on hyaluronic acid dermal fillers.</p>
+        $this->set('text', '<p>This one day course, is designed for non-licensed and licensed medical professionals seeking to develop a strong foundation in hyaluronic acid-based dermal fillers. The course course focuses on lip enhancement with the introduction to dermal fillers including facial anatomy, the layers of the skin and aging process, how dermal filler works, key treatment techniques, and managing complications.</p>
 
-        <p>The course covers an extensive curriculum, including an overview of anatomy and physiology related to skin and fillers, the history of dermal fillers, their FDA approvals, and their mechanisms of action. Emphasis is placed on managing client expectations, understanding contraindications, and navigating potential risks, ensuring participants are well-equipped to handle any scenario.</p>
+        <p>The course provides a focused overview of facial anatomy, muscle function, and how dermal fillers interact with the skin. Participants will learn key safety principles, how to assess clients, identify contraindications, and manage risks to ensure safe, natural-looking results.</p>
         
-        <p>What sets this course apart is its intensive, hands-on training approach. Participants will have the opportunity to practice injection techniques on live models, focusing on key treatment areas such as the lips, nasolabial folds, melomental folds, and fine lines. Techniques covered include bolus, serial puncture, retrograde and antegrade injections, linear threading, fanning, cross-hatching, and layering, utilizing Allegan Juvederm products.</p>
+        <p>A strong emphasis is placed on hands-on training. Participants will work on live models, practicing lip enhancement and treating areas such as the nasolabial folds. Core techniques include proper dosing, placement, and blending to achieve balanced and controlled outcomes.</p>
         
-        <p>Additionally, the course delves into the critical aspects of patient consultation and facial assessment, guiding students through the process of achieving optimal aesthetic outcomes. Whether you´re looking to integrate dermal fillers into your practice or refine your existing skills, this course promises a rich learning experience!</p>');
+        <p>The course also covers consultation and facial assessment, helping attendees understand how to build effective treatment plans for full facial harmony. Whether you are new to fillers or looking to sharpen your skills, this course is designed to prepare you for real-world application.</p>');
 
         $this->loadModel('SpaLiveV1.DataDeferredPayments');
         $deferred_payment = $this->DataDeferredPayments->find()->where(['user_id' => USER_ID, 'status' => 'PENDING', 'type' => 'LEVEL 3 MEDICAL', 'deleted' => 0])->first();
@@ -4473,7 +4473,7 @@ class LoginController extends AppPluginController{
 
         $this->set('details', '');
         $this->set('seemore', 'https://blog.myspalive.com/certified-schools');
-        $this->set('title_check_box', 'I certify that I am a RN or above');
+        $this->set('title_check_box', '');
         $this->success();
     }
 
@@ -4878,7 +4878,7 @@ class LoginController extends AppPluginController{
             }
 
             $trainings_data[] = array(
-                'title' => 'Filler Foundations',
+                'title' => 'Filler Course Level 1',
                 'data' => $tr_result,
             );
         } else{

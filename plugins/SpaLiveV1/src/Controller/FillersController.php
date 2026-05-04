@@ -205,9 +205,32 @@ class FillersController extends AppPluginController {
                 ->where(['DataTrainings.user_id' => $user_id,'DataTrainings.deleted' => 0,'DataTrainings.attended' => 1,'CatTrainings.deleted' => 0,'STOT.name_key' => 'FILLERS'])
                 ->first();
 
-                if(!empty($user_course_basic)){
+            if(!empty($user_course_basic)){
+                $has_certificate = true;
+            } else {
+                $level3Fillers = $this->DataTrainings->find()
+                    ->join([
+                        'CatTrainings' => [
+                            'table' => 'cat_trainings',
+                            'type' => 'INNER',
+                            'conditions' => 'CatTrainings.id = DataTrainings.training_id',
+                        ],
+                    ])
+                    ->select(['DataTrainings.id'])
+                    ->where([
+                        'DataTrainings.user_id' => $user_id,
+                        'DataTrainings.deleted' => 0,
+                        'DataTrainings.attended' => 1,
+                        'CatTrainings.deleted' => 0,
+                        'CatTrainings.level' => 'LEVEL 3 FILLERS',
+                    ])
+                    ->order(['DataTrainings.id' => 'DESC'])
+                    ->first();
+
+                if (!empty($level3Fillers)) {
                     $has_certificate = true;
                 }
+            }
         }
 
         return $has_certificate;
