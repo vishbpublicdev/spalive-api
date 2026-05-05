@@ -6551,8 +6551,16 @@ class TreatmentsController extends AppPluginController{
             }
 
             if(isset($array_treatments['fillers'])){
-                $where = ['user_id' => $value['id'], 'status' => 'ACTIVE', 'deleted' => 0, 'subscription_type LIKE' => '%MD%'];
-                $where['OR'] = [['main_service' => 'FILLERS'], ['addons_services LIKE' => '%FILLERS%']];
+                $where = [
+                    'user_id' => $value['id'],
+                    'status' => 'ACTIVE',
+                    'deleted' => 0,
+                    'subscription_type LIKE' => '%MD%',
+                    'OR' => [
+                        ['main_service LIKE' => '%FILLERS%'],
+                        ['addons_services LIKE' => '%FILLERS%'],
+                    ],
+                ];
                 $ent_sub = $this->DataSubscriptions->find()->where($where)->first();
 
                 if(empty($ent_sub)){
@@ -7030,8 +7038,15 @@ class TreatmentsController extends AppPluginController{
             }
 
             if(isset($array_treatments['fillers'])){
-                $where = ['user_id' => $value['id'], 'status' => 'ACTIVE', 'deleted' => 0, 'subscription_type LIKE' => '%MD%'];
-                $where['OR'] = [['main_service' => 'FILLERS'], ['addons_services LIKE' => '%FILLERS%']];
+                $where = [
+                    'user_id' => $value['id'],
+                    'status' => 'ACTIVE',
+                    'deleted' => 0,
+                    'OR' => [
+                        ['main_service LIKE' => '%FILLERS%'],
+                        ['addons_services LIKE' => '%FILLERS%'],
+                    ],
+                ];
                 $ent_sub = $this->DataSubscriptions->find()->where($where)->first();
 
                 if(empty($ent_sub)){
@@ -7261,6 +7276,32 @@ class TreatmentsController extends AppPluginController{
 
     }
 
+    /**
+     * Whether the user has an active subscription that includes FILLERS
+     * via main_service or addons_services (not subscription_type).
+     */
+    private function injectorHasFillersSubscription(int $userId): bool
+    {
+        if ($userId <= 0) {
+            return false;
+        }
+        $this->loadModel('SpaLiveV1.DataSubscriptions');
+        $row = $this->DataSubscriptions->find()
+            ->select(['DataSubscriptions.id'])
+            ->where([
+                'DataSubscriptions.user_id' => $userId,
+                'DataSubscriptions.deleted' => 0,
+                'DataSubscriptions.status' => 'ACTIVE',
+                'OR' => [
+                    ['DataSubscriptions.main_service LIKE' => '%FILLERS%'],
+                    ['DataSubscriptions.addons_services LIKE' => '%FILLERS%'],
+                ],
+            ])
+            ->first();
+
+        return !empty($row);
+    }
+
     public function save_treatment(){
         $this->loadModel('SpaLiveV1.DataTreatment');
         $this->loadModel('SpaLiveV1.DataConsultationAnswers');
@@ -7331,14 +7372,13 @@ class TreatmentsController extends AppPluginController{
                 'Cat' => ['table' => 'cat_treatments_category', 'type' => 'INNER', 'conditions' => 'Cat.id = CatCITreatments.category_treatment_id'],
             ])
             ->where(['CatCITreatments.id IN' => explode(',', $string_treatments)])->all();
-
-            $array_list = array();
             
+            $array_list = array();
+            $injectorHasFillersSub = $this->injectorHasFillersSubscription((int)$assistance_id);
+
             foreach ($ent_treatments as $key => $value) {
                 if($value['Cat']['type'] == 'FILLERS'){
-                    $this->loadModel('SpaLiveV1.DataSubscriptions');
-                    $ent_sub = $this->DataSubscriptions->find()->where(['user_id' => $assistance_id, 'deleted' => 0, 'status' => 'ACTIVE', 'subscription_type LIKE' => '%MD%'])->first();
-                    if(strpos($ent_sub->subscription_type, 'FILLERS') !== false){
+                    if ($injectorHasFillersSub) {
                         $array_list[] = $value->id;
                     }
                 }else{
@@ -7347,6 +7387,10 @@ class TreatmentsController extends AppPluginController{
             }
 
             $string_treatments = implode(',', $array_list);
+            if ($string_treatments === '') {
+                $this->message('Treatments empty or not permitted for this injector.');
+                return;
+            }
         }
 
         $assigned_doctor = $this->SysUserAdmin->getRandomDoctor($assistance_id);        
@@ -7379,8 +7423,9 @@ class TreatmentsController extends AppPluginController{
 
         $this->loadModel('SpaLiveV1.CatStates');
         $obj_state = $this->CatStates->find()->select(['CatStates.name'])->where(['CatStates.id' => USER_STATE])->first();
-                    
-        $chain =  $user['street'] . ' ' . $user['city'] . ' ' . $user['zip'] . ' ,' . $obj_state->name;
+        $stateName = !empty($obj_state) ? $obj_state->name : '';
+
+        $chain =  $user['street'] . ' ' . $user['city'] . ' ' . $user['zip'] . ' ,' . $stateName;
 
         $coordinates = $Main->validate_coordinates($chain, $user['zip']);
         $array_save['latitude']   = $coordinates['latitude'];
@@ -7389,12 +7434,16 @@ class TreatmentsController extends AppPluginController{
         //******
 
         $c_entity = $this->DataTreatment->newEntity($array_save);
-        if(!$c_entity->hasErrors()) {
-            if ($this->DataTreatment->save($c_entity)) {
-                $this->set('treatment_uid', $treatment_uid);
-                $this->success();
-            }
+        if ($c_entity->hasErrors()) {
+            $this->message('Validation failed.');
+            return;
         }
+        if ($this->DataTreatment->save($c_entity)) {
+            $this->set('treatment_uid', $treatment_uid);
+            $this->success();
+            return;
+        }
+        $this->message('Could not save treatment.');
     }
 
     public function update_treatment(){
@@ -7427,6 +7476,10 @@ class TreatmentsController extends AppPluginController{
         }
 
         $ent_treatment = $this->DataTreatment->find()->where(['uid' => $treatment_uid])->first();
+        if (empty($ent_treatment)) {
+            $this->message('Treatment not found.');
+            return;
+        }
 
         $injector_id = get('injector_id', 0);
 
@@ -7440,7 +7493,7 @@ class TreatmentsController extends AppPluginController{
             return;
         }*/
 
-        if($injector_id > 0){
+        if($injector_id > 0 && $string_treatments !== ''){
             $this->loadModel('SpaLiveV1.CatCITreatments'); 
             $ent_treatments = $this->CatCITreatments->find()->select(['CatCITreatments.id','CatCITreatments.name','CatCITreatments.details', 'CatCITreatments.std_price', 'Cat.name', 'Cat.type', 'CatCITreatments.category_treatment_id'])
             ->join([
@@ -7449,12 +7502,11 @@ class TreatmentsController extends AppPluginController{
             ->where(['CatCITreatments.id IN' => explode(',', $string_treatments)])->all();
 
             $array_list = array();
-            
+            $injectorHasFillersSub = $this->injectorHasFillersSubscription((int)$injector_id);
+
             foreach ($ent_treatments as $key => $value) {
                 if($value['Cat']['type'] == 'FILLERS'){
-                    $this->loadModel('SpaLiveV1.DataSubscriptions');
-                    $ent_sub = $this->DataSubscriptions->find()->where(['user_id' => $injector_id, 'deleted' => 0, 'status' => 'ACTIVE', 'subscription_type LIKE' => '%MD%'])->first();
-                    if(strpos($ent_sub->subscription_type, 'FILLERS') !== false){
+                    if ($injectorHasFillersSub) {
                         $array_list[] = $value->id;
                     }
                 }else{
@@ -7463,6 +7515,10 @@ class TreatmentsController extends AppPluginController{
             }
 
             $string_treatments = implode(',', $array_list);
+            if ($string_treatments === '') {
+                $this->message('Treatments empty or not permitted for this injector.');
+                return;
+            }
         }
 
         $schedule_date = get('schedule_date','');
