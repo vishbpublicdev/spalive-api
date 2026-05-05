@@ -24047,12 +24047,18 @@ class MainController extends AppPluginController {
         }
 
 
-        // valida stock de fillers y prerrequisitos (level 1 + level 2 completados)
+        // Stock + prerequisites: basic neurotoxin + (advanced online or LEVEL 2 in-person); see CourseController::validateBasicAndAdvancedTraining
         $fillers = $this->CatProducts->find()->where(['CatProducts.id' => 178, 'CatProducts.deleted' => 0, 'CatProducts.stock' => 1])->first();
         $hasBasicAndAdvancedCourse = CourseController::validateBasicAndAdvancedTraining($this);
         $canShowBuyButtonLevel3Fillers = !empty($fillers) && $hasBasicAndAdvancedCourse && $show_buy_button_level_3_fillers;
-        $this->set("show_buy_button_level_3_fillers", $canShowBuyButtonLevel3Fillers);
 
+        $message_level_3_fillers_prerequisite = '';
+        if (!empty($fillers) && $show_buy_button_level_3_fillers && !$hasBasicAndAdvancedCourse) {
+            $message_level_3_fillers_prerequisite = 'To purchase Filler Level 1 you must complete Basic Neurotoxin training and Advanced Neurotoxin or Level 2 (in-person) training.';
+        }
+
+        $this->set('show_buy_button_level_3_fillers', $canShowBuyButtonLevel3Fillers);
+        $this->set('message_level_3_fillers_prerequisite', $message_level_3_fillers_prerequisite);
 
         $this->set("show_buy_button_basic", $show_buy_button_basic);
         $this->set("show_buy_button_advanced", $show_buy_button_advanced);
