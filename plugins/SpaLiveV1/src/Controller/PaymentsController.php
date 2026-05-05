@@ -884,7 +884,7 @@ class PaymentsController extends AppPluginController{
         $this->loadModel('SpaLiveV1.DataPromoCodes');
 
         // Course checkouts: do not pass Stripe processing fee to the customer (display or charge).
-        $courseCategoriesNoStripePass = ['REGISTER', 'TRAINING', 'LEVEL3', 'OTCOURSE'];
+        $courseCategoriesNoStripePass = ['REGISTER', 'TRAINING', 'LEVEL3', 'OTCOURSE','FILLERS'];
 
         $ent_codes = $this->DataPromoCodes->find()
         ->where(['DataPromoCodes.deleted' => 0,'DataPromoCodes.active' => 1,'DataPromoCodes.code' => strtoupper($code)])->first();
