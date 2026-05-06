@@ -1361,7 +1361,7 @@ class CourseController extends AppPluginController {
         $_where = ['DataTrainigs.user_id' => USER_ID, 
                     'DataTrainigs.deleted' => 0, 
                     'CatTrainigs.deleted' => 0,                   
-                    'CatTrainigs.level = "LEVEL 3 FILLERS"'];
+                    'CatTrainigs.level IN' => ['LEVEL 3 FILLERS', 'FILLER_COURSE_LEVEL_1']];
 
         $ent_training_fillers = $this->CatTrainigs->find()
                                         ->select($_fields)
@@ -1531,10 +1531,21 @@ class CourseController extends AppPluginController {
             }
 
             // Procesar entrenamiento filler
+            $ent_payments_fillers = $this->DataPayment->find()->where([
+                'DataPayment.refund_id' => 0,
+                'DataPayment.id_from' => USER_ID,
+                'DataPayment.type IN' => ['FILLERS COURSE', 'LEVEL_TWO_DUAL_TOX_AND_DEMALL_FILLER', 'FILLER_COURSE_LEVEL_1'],
+                'DataPayment.payment !=' => '',
+                'DataPayment.is_visible' => 1
+            ])->first();
 
             if(!empty($ent_training_fillers)){
                 $isBeforeChange = $c_date > strtotime($ent_training_fillers->scheduled->i18nFormat('yyyy-MM-dd 08:00:00'));
-                if ($isBeforeChange) $training['attended'] = "1";
+                if ($isBeforeChange) {
+                    $ent_training_fillers['attended'] = '1';
+                }
+                $rawFillerAttendedLegacy = $ent_training_fillers['attended'] ?? null;
+                $fillerAttendedNormLegacy = ($rawFillerAttendedLegacy === null || $rawFillerAttendedLegacy === '') ? '0' : (string)$rawFillerAttendedLegacy;
 
                 $this->loadModel('SpaLiveV1.DataCourses');
                 $data_course = $this->DataCourses->find()->where(['DataCourses.user_id' => USER_ID,
@@ -1569,7 +1580,7 @@ class CourseController extends AppPluginController {
                 }
 
                 
-                if ($ent_training_fillers['attended'] == "0") {
+                if ($fillerAttendedNormLegacy === '0') {
                     $advanced_count = 1;
                     $advanced = 'STUDING';
                     $scheduled_fill = $ent_training_fillers['scheduled']->i18nFormat('yyyy-MM-dd 08:00:00');
@@ -1581,7 +1592,7 @@ class CourseController extends AppPluginController {
                         'address' => $address,
                         'level' => $ent_training_fillers['level'],
                         'data_training_id' => $ent_training_fillers['data_training_id'],
-                        'attended' => $ent_training_fillers['attended'],
+                        'attended' => $fillerAttendedNormLegacy,
                         'show_cancel' => false,
                         'data' => array(
                             [
@@ -1607,6 +1618,43 @@ class CourseController extends AppPluginController {
                         'data_training_id' => $ent_training_fillers['data_training_id'],
                     );
                 }
+            } else if (!empty($ent_payments_fillers)) {
+                $res[] = array(
+                    'id' => 0,
+                    'title' => 'Filler Foundations Course',
+                    'scheduled' => 'Date selection',
+                    'address' => 'Class date and location to be defined.',
+                    'level' => 'LEVEL 3 FILLERS',
+                    'data_training_id' => '',
+                    'attended' => '0',
+                    'show_cancel' => false,
+                    'data' => array(
+                        [
+                            'title' => 'MySpaLive video',
+                            'url' => Configure::read('App.wordpress_domain') . '/myspa.mp4',
+                            'type' => 'video'
+                        ],
+                        [
+                            'title' => 'How to use the App',
+                            'url' => Configure::read('App.wordpress_domain') . '/wp-content/uploads/howtouse.mp4',
+                            'type' => 'video'
+                        ]
+                    ),
+                    'ot' => 0,
+                    'certificate' => array(
+                        'show_button' => false,
+                        'message' => '',
+                        'valid_certificate' => true,
+                        'cert_status' => 'PENDING',
+                        'required' => false,
+                        'url' => ''
+                    ),
+                    'type' => 'LEVEL 3 FILLERS',
+                    'show_assistance_code' => false,
+                    'continue_sign' => true,
+                    'today' => false,
+                    'coursed' => false
+                );
             }
 
             $data_reschedule = $this->DataRescheduleTrainings->find()
@@ -1931,10 +1979,23 @@ class CourseController extends AppPluginController {
                         
             }
 
-            if ($ent_training_fillers) {
+            $ent_payments_fillers = $this->DataPayment->find()->where([
+                'DataPayment.refund_id' => 0,
+                'DataPayment.id_from' => USER_ID,
+                'DataPayment.type IN' => ['FILLERS COURSE', 'LEVEL_TWO_DUAL_TOX_AND_DEMALL_FILLER', 'FILLER_COURSE_LEVEL_1'],
+                'DataPayment.payment !=' => '',
+                'DataPayment.is_visible' => 1
+            ])->first();
+
+            $fillers_course_status = 'BUY';
+            if (!empty($ent_payments_fillers)) {
+                $fillers_course_status = 'BOOK';
+            }
+
+            if (empty($ent_training_fillers) && ($fillers_course_status == 'BUY' || $fillers_course_status == 'BOOK')) {
                 $arr_other_courses_list[] = [
                     'title' => 'Fillers',
-                    'status' => 'BUY',
+                    'status' => $fillers_course_status,
                     'type' => 'FILLER',
                     'course_type_id' => 0
                 ];
@@ -2220,7 +2281,7 @@ class CourseController extends AppPluginController {
         $_where = ['DataTrainigs.user_id' => USER_ID, 
                     'DataTrainigs.deleted' => 0, 
                     'CatTrainigs.deleted' => 0,                   
-                    'CatTrainigs.level = "LEVEL 3 FILLERS"'];
+                    'CatTrainigs.level IN' => ['LEVEL 3 FILLERS', 'FILLER_COURSE_LEVEL_1']];
 
         $ent_training_fillers = $this->CatTrainigs->find()
                                         ->select($_fields)
@@ -2540,7 +2601,11 @@ class CourseController extends AppPluginController {
 
             if(!empty($ent_training_fillers)){
                 $isBeforeChange = $c_date > strtotime($ent_training_fillers->scheduled->i18nFormat('yyyy-MM-dd 08:00:00'));
-                if ($isBeforeChange) $training['attended'] = "1";
+                if ($isBeforeChange) {
+                    $ent_training_fillers['attended'] = '1';
+                }
+                $rawFillerAttended = $ent_training_fillers['attended'] ?? null;
+                $fillerAttendedNorm = ($rawFillerAttended === null || $rawFillerAttended === '') ? '0' : (string)$rawFillerAttended;
 
                 $this->loadModel('SpaLiveV1.DataCourses');
                 $data_course = $this->DataCourses->find()->where(['DataCourses.user_id' => USER_ID,
@@ -2578,7 +2643,7 @@ class CourseController extends AppPluginController {
                         ),
                         'type' => $ent_training_fillers['level'],
                         'show_assistance_code' => $show_assistance,
-                        'continue_sign' => true,
+                        'continue_sign' => false,
                         'today' => $today,
                         'coursed' => false
                     );
@@ -2590,7 +2655,7 @@ class CourseController extends AppPluginController {
                 $scheduled_fill = $ent_training_fillers['scheduled']->i18nFormat('yyyy-MM-dd 08:00:00');
                 $address = $ent_training_fillers->address.', '.$ent_training_fillers->city.', '.$ent_training_fillers->State['abv'].' '.$ent_training_fillers->zip;
                 
-                if ($ent_training_fillers['attended'] == "0") {
+                if ($fillerAttendedNorm === '0') {
                     $advanced_count = 1;
                     $advanced = 'STUDING';
                     $res[] = array(
@@ -2600,7 +2665,7 @@ class CourseController extends AppPluginController {
                         'address' => $address,
                         'level' => $ent_training_fillers['level'],
                         'data_training_id' => $ent_training_fillers['data_training_id'],
-                        'attended' => $ent_training_fillers['attended'],
+                        'attended' => $fillerAttendedNorm,
                         'show_cancel' => false,
                         'data' => array(
                             [
@@ -2625,19 +2690,23 @@ class CourseController extends AppPluginController {
                         ),
                         'type' => $ent_training_fillers['level'],
                         'show_assistance_code' => $show_assistance,
-                        'continue_sign' => true,
+                    'continue_sign' => false,
                         'today' => $today,
                         'coursed' => false
                     );
                 } else{ 
+                    $fillersLevelKeys = ['FILLER_COURSE_LEVEL_1', 'LEVEL 3 FILLERS'];
+                    $fillersLevelLabel = in_array((string)$ent_training_fillers['level'], $fillersLevelKeys, true)
+                        ? 'FILLERS'
+                        : $ent_training_fillers['level'];
                     $res[] = array(
                         'id' => $ent_training_fillers['id'],
-                        'title' => 'Start Providing ' . $ent_training_fillers['level'] . ' Treatments',
+                        'title' => 'Start Providing ' . $fillersLevelLabel . ' Treatments',
                         'scheduled' => $ent_training_fillers['scheduled']->i18nFormat('yyyy-MM-dd hh:mm a'),
                         'address' => $address,
                         'level' => 'subscriptions',
                         'data_training_id' => $ent_training_fillers['data_training_id'],
-                        'attended' => $ent_training_fillers['attended'],
+                        'attended' => $fillerAttendedNorm,
                         'show_cancel' => false,
                         'data' => array(
                             [
@@ -2873,10 +2942,25 @@ class CourseController extends AppPluginController {
                         
             }
 
-            if ($offer_fillers_ot_course || !empty($ent_training_fillers)) {
+            $ent_payments_fillers = $this->DataPayment->find()->where([
+                'DataPayment.refund_id' => 0,
+                'DataPayment.id_from' => USER_ID,
+                'DataPayment.type IN' => ['FILLERS COURSE', 'LEVEL_TWO_DUAL_TOX_AND_DEMALL_FILLER', 'FILLER_COURSE_LEVEL_1'],
+                'DataPayment.payment !=' => '',
+                'DataPayment.is_visible' => 1
+            ])->first();
+
+            $fillers_course_status = 'BUY';
+            if (!empty($ent_payments_fillers)) {
+                $fillers_course_status = 'BOOK';
+            }
+
+            if (($offer_fillers_ot_course || !empty($ent_payments_fillers))
+                && empty($ent_training_fillers)
+                && ($fillers_course_status == 'BUY' || $fillers_course_status == 'BOOK')) {
                 $arr_other_courses_list[] = [
                     'title' => 'Filler Course Level 1',
-                    'status' => 'BUY',
+                    'status' => $fillers_course_status,
                     'type' => 'FILLER',
                     'course_type_id' => 0
                 ];

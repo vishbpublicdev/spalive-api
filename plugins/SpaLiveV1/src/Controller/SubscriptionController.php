@@ -1974,6 +1974,7 @@ class SubscriptionController extends AppPluginController {
         $levels = [
             'LEVEL 1',
             'LEVEL 3 FILLERS',
+            'FILLER_COURSE_LEVEL_1',
             'BOTH NEUROTOXINS',
             'NEUROTOXINS BASIC',
             'FILLERS',
@@ -2010,6 +2011,7 @@ class SubscriptionController extends AppPluginController {
                     $main_service_md = 'NEUROTOXINS';
                     break;
                 case 'LEVEL 3 FILLERS':
+                case 'FILLER_COURSE_LEVEL_1':
                 case 'FILLERS':
                     $name_keys_to_check[] = 'FILLERS';
                     $total_msl_coverage = 1;
