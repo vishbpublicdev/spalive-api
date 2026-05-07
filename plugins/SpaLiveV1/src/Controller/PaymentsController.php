@@ -13863,7 +13863,7 @@ foreach ($ent_query_dispute as $key => $value) {
 
         // Check if any products are in skin product categories
         $skin_products = array_filter($purchase_details, function($detail) {
-            return in_array($detail['Product']['category'], ['ACNE PRODUCTS', 'BRIGHTENING PRODUCTS', 'ANTI-AGING PRODUCTS', 'BACKBAR PRODUCTS']);
+            return in_array($detail['Product']['category'], ['ACNE PRODUCTS', 'BRIGHTENING PRODUCTS', 'ANTI-AGING PRODUCTS', 'BACKBAR PRODUCTS', 'SKIN PRODUCTS', 'SKIN KITS']);
         });
 
         if (empty($skin_products)) {
