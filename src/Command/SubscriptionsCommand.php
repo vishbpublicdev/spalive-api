@@ -1491,7 +1491,7 @@ class SubscriptionsCommand extends Command{
     }
 
     private function email_relations($row){
-
+        return;
         $isDev = env('IS_DEV', false);
 
 

@@ -11390,7 +11390,7 @@ if (isset($arr_subscriptions['membership_msl_iv'])) {
                 '<p>Type ' . $type_sub . ' ' . $treatment_sub . ' subscription date: ' . $sub_date . ' expected end date: ' . $date_cancel . ' of the next cycle.';
 
         if(!$isDev){ 
-            $to = 'francisco@advantedigital.com,support@myspalive.com,patientrelations@myspalive.com';
+            $to = 'francisco@advantedigital.com,support@myspalive.com';
         }else{
             $to = 'francisco@advantedigital.com';
         }
