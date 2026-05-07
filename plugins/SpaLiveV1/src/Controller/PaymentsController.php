@@ -56,7 +56,7 @@ class PaymentsController extends AppPluginController{
     private $ship_cost_vial = 4000;
     private $training_basic = 89500;
     private $training_advanced = 89500;
-    private $level_3_fillers = 150000;//level 3 fillers
+    private $level_3_fillers = 149500;//level 3 fillers
     private $level_3_medical = 99500;//level 3 medical
     private $level_1_to_1 = 19999;//level 1 to 1
     private $emergencyPhone = "9035301512";

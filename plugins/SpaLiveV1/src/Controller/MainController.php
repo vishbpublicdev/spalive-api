@@ -23389,7 +23389,7 @@ class MainController extends AppPluginController {
                             'available_seats' => $seats,
                             'status' => 'ENROLLED',
                             'address' => $address,
-                            'level' => 'Filler Foundations',
+                            'level' => 'Fillers Course Level 1',
                         );
 
                     } else {
@@ -23421,7 +23421,7 @@ class MainController extends AppPluginController {
                                     'available_seats' => $seats,
                                     'status' => 'JOIN',
                                     'address' => $address,
-                                    'level' => 'Filler Foundations',
+                                    'level' => 'Fillers Course Level 1',
                                 );
                             }
 
@@ -23440,7 +23440,7 @@ class MainController extends AppPluginController {
                         'available_seats' => 0,
                         'status' => 'Waiting for payment',
                         'address' => '',
-                        'level' => 'Filler Foundations',
+                        'level' => 'Fillers Course Level 1',
                     );
                 }else{
                     $show_buy_button_level_3_fillers = true;
@@ -23451,7 +23451,7 @@ class MainController extends AppPluginController {
                         'available_seats' => 0,
                         'status' => '',
                         'address' => '',
-                        'level' => 'Filler Foundations',
+                        'level' => 'Fillers Course Level 1',
                     );
                 }
             }
@@ -23465,7 +23465,7 @@ class MainController extends AppPluginController {
                 'available_seats' => 0,
                 'status' => '',
                 'address' => '',
-                'level' => 'Filler Foundations',
+                'level' => 'Fillers Course Level 1',
                 'data_training_id' => 0,
                 'checked' => false
             );

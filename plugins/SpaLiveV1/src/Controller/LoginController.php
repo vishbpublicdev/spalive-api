@@ -2898,6 +2898,7 @@ class LoginController extends AppPluginController{
             'LEVEL 3 MEDICAL',
             'LEVEL 2',
             'LEVEL 3 FILLERS',
+            'FILLER_COURSE_LEVEL_1',
             'LEVEL 1-1 NEUROTOXINS',
             'MYSPALIVE_S_HYBRID_TOX_FILLER_COURSE',
             'MYSPALIVES_HYBRID_TOX_FILLER_COURSE',
@@ -2933,6 +2934,7 @@ class LoginController extends AppPluginController{
                     ];
                     break;
                 case 'LEVEL 3 FILLERS':
+                case 'FILLER_COURSE_LEVEL_1':
                 case 'FILLERS':
                     $agreement_md = $this->CatAgreements->find()
                         ->select([
@@ -4253,7 +4255,7 @@ class LoginController extends AppPluginController{
         $Partially = new \SpaLiveV1\Controller\PartiallyController();
         $Partially->initialize();
         $deferred_offer_id = isset($Partially->deferred_offers['basic']) && !empty($Partially->deferred_offers['basic']) ? $Partially->deferred_offers['basic'] : null;
-        $this->set('installments_deferred', !empty($deferred_offer_id) ? true : false);
+        $this->setCourseInstallmentsFlags(!empty($deferred_offer_id), '');
 
         $this->set('title_option', 'Neurotoxin Course - Level 1: $' . $training_amount);
         $this->set('training_amount', $training_amount);
@@ -4272,6 +4274,15 @@ class LoginController extends AppPluginController{
         $this->getSalesRep();
 
         $this->success();
+    }
+
+    /**
+     * Course purchase: show/hide installments and optional external checkout URL (opened in device browser).
+     */
+    private function setCourseInstallmentsFlags($installmentsDeferred, $externalUrl = '') {
+        $this->set('installments_deferred', $installmentsDeferred ? true : false);
+        $url = ($installmentsDeferred && !empty($externalUrl)) ? (string) $externalUrl : '';
+        $this->set('installments_external_url', $url);
     }
 
     private function getSalesRep() {
@@ -4386,7 +4397,7 @@ class LoginController extends AppPluginController{
         $Partially = new \SpaLiveV1\Controller\PartiallyController();
         $Partially->initialize();
         $deferred_offer_id = isset($Partially->deferred_offers['advanced']) && !empty($Partially->deferred_offers['advanced']) ? $Partially->deferred_offers['advanced'] : null;
-        $this->set('installments_deferred', !empty($deferred_offer_id) ? true : false);
+        $this->setCourseInstallmentsFlags(!empty($deferred_offer_id), '');
 
         $this->set('title_option', 'Neurotoxin Course - Level 2 $' . $training_amount);
         $this->set('training_amount', $training_amount);
@@ -4447,7 +4458,10 @@ class LoginController extends AppPluginController{
         $Partially = new \SpaLiveV1\Controller\PartiallyController();
         $Partially->initialize();
         $deferred_offer_id = isset($Partially->deferred_offers['level_3']) && !empty($Partially->deferred_offers['level_3']) ? $Partially->deferred_offers['level_3'] : null;
-        $this->set('installments_deferred', !empty($deferred_offer_id) ? true : false);
+        $installments_deferred = !empty($deferred_offer_id);
+        // When installments are enabled, send users to external checkout (empty string = legacy in-app flow).
+        $installments_external_url = $installments_deferred ? 'https://port2pay.com/Shop' : '';
+        $this->setCourseInstallmentsFlags($installments_deferred, $installments_external_url);
 
         $this->set('title_option', 'Filler Course Level 1 - $' . $training_amount);
         $this->set('training_amount', $training_amount);
@@ -4523,7 +4537,7 @@ class LoginController extends AppPluginController{
         $Partially = new \SpaLiveV1\Controller\PartiallyController();
         $Partially->initialize();
         $deferred_offer_id = isset($Partially->deferred_offers['level_3']) && !empty($Partially->deferred_offers['level_3']) ? $Partially->deferred_offers['level_3'] : null;
-        $this->set('installments_deferred', !empty($deferred_offer_id) ? true : false);
+        $this->setCourseInstallmentsFlags(!empty($deferred_offer_id), '');
 
         $this->set('title_option', 'Level 3 Elite Techniques Course $' . $training_amount);
         $this->set('training_amount', $training_amount);
@@ -4579,7 +4593,7 @@ class LoginController extends AppPluginController{
         $Partially = new \SpaLiveV1\Controller\PartiallyController();
         $Partially->initialize();
         $deferred_offer_id = isset($Partially->deferred_offers['elite']) && !empty($Partially->deferred_offers['elite']) ? $Partially->deferred_offers['elite'] : null;
-        $this->set('installments_deferred', !empty($deferred_offer_id) ? true : false);
+        $this->setCourseInstallmentsFlags(!empty($deferred_offer_id), '');
 
         $this->set('title_option', 'ToxTune-Up Sessions $' . $this->level_1_1/100);
         $this->set('total', $this->level_1_1/100);
@@ -4855,12 +4869,19 @@ class LoginController extends AppPluginController{
                 'State' => ['table' => 'cat_states', 'type' => 'INNER', 'conditions' => 'State.id = CatTrainigs.state_id']
             ];
 
-            $_where = ['CatTrainigs.scheduled >' => $now, 'CatTrainigs.deleted' => 0, 'CatTrainigs.deleted' => 0, 'CatTrainigs.level' => 'LEVEL 3 FILLERS', 'CatTrainigs.mint <> 1','CatTrainigs.state_id' => USER_STATE];
+            $_where = [
+                'CatTrainigs.scheduled >' => $now,
+                'CatTrainigs.deleted' => 0,
+                'CatTrainigs.level IN' => ['FILLER_COURSE_LEVEL_1', 'LEVEL 3 FILLERS'],
+                'CatTrainigs.mint <>' => 1,
+                'CatTrainigs.state_id' => USER_STATE
+            ];
 
             $tr_result = array();
             $trainingsavailable  = $this->CatTrainigs->find()->select($fields)
             ->join($_join)
             ->where($_where)->order(['CatTrainigs.scheduled' => 'ASC'])->toArray();
+
             foreach ($trainingsavailable as $row) {
                 $seats = $row['available_seats'] - $row['assistants'];
                 if($seats <= 0) continue;
@@ -5291,6 +5312,8 @@ class LoginController extends AppPluginController{
                 } else{
                     if($temp_user->steps != 'HOME' /*&& $temp_user->steps != 'WAITINGSCHOOLAPPROVAL'*/){
                         $step = 'MATERIALS';
+                    } else{
+                        $step = $temp_user->steps;
                     }
 
                     $userEntity->steps = $step;
