@@ -46,6 +46,10 @@ class MigrateSysUsersAuthProfilesCommand extends Command
                 'default' => 'sys_users:auth_profiles',
                 'help' => 'Checkpoint name used to persist last migrated legacy id.',
             ])
+            ->addOption('log-file', [
+                'default' => LOGS . 'migration_sys_users_auth_profiles.jsonl',
+                'help' => 'Append JSONL log lines for skips / already-exists cases.',
+            ])
             ->addOption('resume', [
                 'boolean' => true,
                 'default' => true,
@@ -61,6 +65,7 @@ class MigrateSysUsersAuthProfilesCommand extends Command
         $fromId = max(0, (int)$args->getOption('from-id'));
         $maxRows = max(0, (int)$args->getOption('max-rows'));
         $checkpointKey = (string)$args->getOption('checkpoint-key');
+        $logFile = (string)$args->getOption('log-file');
         $resume = (bool)$args->getOption('resume');
 
         if (!is_file($configPath)) {
@@ -161,10 +166,6 @@ class MigrateSysUsersAuthProfilesCommand extends Command
                     $email = $this->normalizeEmailForAuth((string)$row['email']);
                     if ($email === '' || strpos($email, '@') === false) {
                         $skipped++;
-                        $io->out(sprintf(
-                            'Skipping legacy_user_id=%d: missing or invalid email (empty or no @ after normalize)',
-                            (int)$row['id']
-                        ));
                     } elseif (!$this->isRFC5322LooseEmail($email)) {
                         $skipped++;
                         $io->warning(sprintf(
@@ -172,11 +173,19 @@ class MigrateSysUsersAuthProfilesCommand extends Command
                             (int)$row['id'],
                             $email
                         ));
-                    } elseif ($this->mapAlreadyMigrated($target, (int)$row['id'])) {
+                    } elseif (!$dryRun && $this->mapAlreadyMigrated($target, (int)$row['id'])) {
                         $skipped++;
+                        $this->appendLogLine($logFile, [
+                            'ts' => gmdate('c'),
+                            'phase' => 'A',
+                            'event' => 'skip_already_mapped',
+                            'legacy_user_id' => (int)$row['id'],
+                            'email' => $email,
+                        ]);
                         $io->out(sprintf(
-                            'Skipping legacy_user_id=%d: already in migration_sys_users_map',
-                            (int)$row['id']
+                            'Skipping legacy_user_id=%d (%s): already in migration_sys_users_map',
+                            (int)$row['id'],
+                            $email
                         ));
                     } else {
                     $fullName = $this->buildFullName($row['name'] ?? null, $row['mname'] ?? null, $row['lname'] ?? null);
@@ -192,7 +201,6 @@ class MigrateSysUsersAuthProfilesCommand extends Command
 
                     if ($dryRun) {
                         $migrated++;
-                        $io->out(sprintf('Dry-run: would migrate legacy_user_id=%d', (int)$row['id']));
                     } else {
 
                     $legacyMeta = [
@@ -208,7 +216,16 @@ class MigrateSysUsersAuthProfilesCommand extends Command
                         'legacy_photo_id' => $row['photo_id'] ?? null,
                     ];
 
-                    $this->createAuthUserViaApi($supabaseApiUrl, $supabaseServiceRoleKey, $email, $defaultAuthPassword, $legacyMeta);
+                    $createResult = $this->createAuthUserViaApi($supabaseApiUrl, $supabaseServiceRoleKey, $email, $defaultAuthPassword, $legacyMeta);
+                    if ($createResult === 'exists') {
+                        $this->appendLogLine($logFile, [
+                            'ts' => gmdate('c'),
+                            'phase' => 'A',
+                            'event' => 'auth_user_already_exists',
+                            'legacy_user_id' => (int)$row['id'],
+                            'email' => $email,
+                        ]);
+                    }
 
                     $authRow = $target->prepare("SELECT id FROM auth.users WHERE lower(trim(email)) = :email LIMIT 1");
                     $authRow->execute([':email' => $email]);
@@ -460,7 +477,10 @@ class MigrateSysUsersAuthProfilesCommand extends Command
         ]);
     }
 
-    private function createAuthUserViaApi(string $supabaseApiUrl, string $serviceRoleKey, string $email, string $password, array $legacyMeta): void
+    /**
+     * @return 'created'|'exists'
+     */
+    private function createAuthUserViaApi(string $supabaseApiUrl, string $serviceRoleKey, string $email, string $password, array $legacyMeta): string
     {
         $payload = [
             'email' => $email,
@@ -500,13 +520,13 @@ class MigrateSysUsersAuthProfilesCommand extends Command
         }
 
         if ($httpCode >= 200 && $httpCode < 300) {
-            return;
+            return 'created';
         }
 
         $decoded = json_decode((string)$body, true);
         $msg = is_array($decoded) ? strtolower((string)($decoded['msg'] ?? $decoded['message'] ?? '')) : '';
         if (strpos($msg, 'already') !== false || strpos($msg, 'exists') !== false || strpos($msg, 'registered') !== false) {
-            return;
+            return 'exists';
         }
 
         throw new \RuntimeException('Supabase Admin API create user failed [' . $httpCode . ']: ' . (string)$body);
@@ -673,6 +693,28 @@ class MigrateSysUsersAuthProfilesCommand extends Command
             return false;
         }
         return filter_var($email, FILTER_VALIDATE_EMAIL) !== false;
+    }
+
+    /**
+     * Best-effort JSONL audit trail. Safe for production migrations:
+     * - never throws (logging must not break migration)
+     * - only writes when a path is provided
+     */
+    private function appendLogLine(string $logFile, array $payload): void
+    {
+        $path = trim($logFile);
+        if ($path === '') {
+            return;
+        }
+        $dir = dirname($path);
+        if ($dir !== '' && $dir !== '.' && !is_dir($dir)) {
+            @mkdir($dir, 0775, true);
+        }
+        $line = json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        if (!is_string($line)) {
+            return;
+        }
+        @file_put_contents($path, $line . PHP_EOL, FILE_APPEND);
     }
 }
 
