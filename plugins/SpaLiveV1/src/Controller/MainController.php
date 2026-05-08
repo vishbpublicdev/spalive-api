@@ -24985,6 +24985,11 @@ class MainController extends AppPluginController {
         $ot_key_name = get('name_key', false);
         
         $this->loadModel('SpaLiveV1.DataPayment');
+
+        $ent_payment = $this->DataPayment->find()
+                ->where(['DataPayment.id_from' => USER_ID, 'DataPayment.id_to' => 0,'DataPayment.type' => 'GFE', 'DataPayment.service_uid' => '','DataPayment.payment <>' => '','DataPayment.prepaid' => 1, 'DataPayment.comission_payed' => 1])->first();
+
+
         // Verificacion para nuevo registro de paciente
         if(USER_TYPE == 'patient') {
             $this->set('crossed_price', '$79');
@@ -25012,8 +25017,7 @@ class MainController extends AppPluginController {
                 $ondemando_flow = true;
             }
 
-            $ent_payment = $this->DataPayment->find()
-                ->where(['DataPayment.id_from' => USER_ID, 'DataPayment.id_to' => 0,'DataPayment.type' => 'GFE', 'DataPayment.service_uid' => '','DataPayment.payment <>' => '','DataPayment.prepaid' => 1, 'DataPayment.comission_payed' => 1])->first();
+
 
             $fields = ['DataTreatment.id', 'DataTreatment.uid', 'DataTreatment.status', 'DataTreatment.treatments'];
             $fields['treatments_string'] = "(SELECT GROUP_CONCAT(CONCAT(CTC.name,' (',CT.name, ')') SEPARATOR ', ') 
@@ -25022,6 +25026,8 @@ class MainController extends AppPluginController {
                                         WHERE FIND_IN_SET(CT.id,DataTreatment.treatments) LIMIT 1)";
             $_where = ['DataTreatment.patient_id' => USER_ID, 'DataTreatment.deleted' => 0];
             $_having = [];
+
+
 
             $ttype = get('type','');
             if (!empty($ttype)) {
@@ -25066,11 +25072,7 @@ class MainController extends AppPluginController {
                     }
                 }
 
-                if($require_gfe){
-                    $request_payment = empty($ent_payment) ? true : false;
-                }else{
-                    $request_payment = false;
-                }
+                $request_payment = empty($ent_payment) ? true : false;
 
                 $av_result = $this->gfeAvailability();
 
@@ -25088,11 +25090,7 @@ class MainController extends AppPluginController {
             }
 
             $require_gfe = true;
-            if($require_gfe){
-                $request_payment = empty($ent_payment) ? true : false;
-            }else{
-                $request_payment = false;
-            }
+            $request_payment = empty($ent_payment) ? true : false;
 
             $av_result = $this->gfeAvailability();
 
@@ -25135,11 +25133,7 @@ class MainController extends AppPluginController {
 
         $request_payment = true;
 
-        if($require_gfe){
-            $request_payment = empty($ent_payment) ? true : false;
-        }else{
-            $request_payment = false;
-        }
+        $request_payment = empty($ent_payment) ? true : false;
 
         $this->set('require_gfe', $require_gfe);
         $this->set('request_payment', $request_payment);
