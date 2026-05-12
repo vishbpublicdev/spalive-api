@@ -134,6 +134,22 @@ class PaymentsController extends AppPluginController{
         return strtoupper(trim($promoCode));
     }
 
+    private function isFillersSubscriptionContext(string $subscriptionType, string $mainService = '', string $addonsServices = ''): bool
+    {
+        $normalizedType = strtoupper(trim($subscriptionType));
+        if (strpos($normalizedType, 'FILLERS') !== false) {
+            return true;
+        }
+
+        $services = strtoupper(trim($mainService . ',' . $addonsServices));
+        return strpos($services, 'FILLERS') !== false;
+    }
+
+    private function isMdSubscriptionType(string $subscriptionType): bool
+    {
+        return stripos($subscriptionType, 'MD') !== false;
+    }
+
     private function isAllPromoAllowedForCategory($entCode, $category, $courseCategories): bool
     {
         if (empty($entCode) || $entCode->category !== 'ALL') {
@@ -8642,6 +8658,7 @@ class PaymentsController extends AppPluginController{
                     'state' => USER_STATE,
                 ]);
 
+                $isFillersSubscription = $this->isFillersSubscriptionContext($subscription_type, (string)$main_service, '');
                 if(!$s_entity->hasErrors()) {
 
                     $id = $this->DataSubscriptions->save($s_entity);
@@ -8649,7 +8666,9 @@ class PaymentsController extends AppPluginController{
 
                     $this->loadModel('SpaLiveV1.SysUserAdmin');
                     $paymentMdId = (int)($ent_user->md_id ?? 0);
-                    if (stripos($subscription_type, 'MD') !== false) {
+                    if ($isFillersSubscription) {
+                        $paymentMdId = $this->SysUserAdmin->getAssignedDoctorForContext((int)USER_ID, ['isFillers' => true]);
+                    } elseif ($this->isMdSubscriptionType($subscription_type)) {
                         $paymentMdId = $this->SysUserAdmin->getAssignedDoctorInjector((int)USER_ID);
                     }
 
@@ -8700,7 +8719,7 @@ class PaymentsController extends AppPluginController{
                     }
                 }
     
-                if (stripos($subscription_type, 'MD') !== false) {
+                if ($this->isMdSubscriptionType($subscription_type) && !$isFillersSubscription) {
                     $injector = $this->SysUsers->find()->where(['SysUsers.id' => USER_ID, 'SysUsers.md_id' => 0])->first();
                     if (!empty($injector)) {
                         $this->loadModel('SpaLiveV1.SysUserAdmin');

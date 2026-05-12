@@ -5,6 +5,12 @@ use Cake\ORM\Table;
 
 class SysUserAdminTable extends Table
 {
+    /**
+     * Config key used to route FILLERS contexts to a dedicated medical director.
+     * It must contain a sys_users_admin.id for an active DOCTOR user.
+     */
+    private const FILLERS_DOCTOR_ENV_KEY = 'FILLERS_MD_ADMIN_ID';
+
     public function initialize(array $config) : void
     {
         $this->setTable('sys_users_admin'); // Name of the table in the database, if absent convention assumes lowercase version of file prefix
@@ -190,5 +196,40 @@ class SysUserAdminTable extends Table
         $afterMd = (int)$rowAfter['md_id'];
 
         return $this->isEligibleDoctorAdmin($afterMd) ? $afterMd : 0;
+    }
+
+    /**
+     * Returns configured active FILLERS doctor id, or 0 when unavailable/invalid.
+     */
+    public function getFillersDoctorId(): int
+    {
+        $configuredId = (int)env(self::FILLERS_DOCTOR_ENV_KEY, '0');
+        if ($configuredId <= 0) {
+            return 0;
+        }
+
+        return $this->isEligibleDoctorAdmin($configuredId) ? $configuredId : 0;
+    }
+
+    /**
+     * Assign doctor by business context.
+     * - FILLERS contexts use configured dedicated MD when available.
+     * - Non-FILLERS keep current assignment behavior.
+     *
+     * @param int $injectorId sys_users.id
+     * @param array<string,mixed> $context
+     * @return int sys_users_admin.id
+     */
+    public function getAssignedDoctorForContext(int $injectorId, array $context = []): int
+    {
+        $isFillers = !empty($context['isFillers']);
+        if ($isFillers) {
+            $fillersMdId = $this->getFillersDoctorId();
+            if ($fillersMdId > 0) {
+                return $fillersMdId;
+            }
+        }
+
+        return $this->getAssignedDoctorInjector($injectorId);
     }
 }

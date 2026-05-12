@@ -288,14 +288,20 @@ class CourseController extends AppPluginController {
         return false;
     }
 
-    public static function validateBasicAndAdvancedTraining($ref) {
+    /**
+     * @see validateBasicAndAdvancedTraining Uses USER_ID from validated session.
+     */
+    public static function validateBasicAndAdvancedTrainingForUser($ref, int $userId): bool {
+        if ($userId <= 0) {
+            return false;
+        }
         $ref->loadModel('SpaLiveV1.DataTrainings');
         $ref->loadModel('SpaLiveV1.DataCourses');
 
         $level1 = $ref->DataTrainings->find()
             ->join(['Cat' => ['table' => 'cat_trainings', 'type' => 'INNER', 'conditions' => 'Cat.id = DataTrainings.training_id']])
             ->where([
-                'DataTrainings.user_id' => USER_ID,
+                'DataTrainings.user_id' => $userId,
                 'DataTrainings.deleted' => 0,
                 'DataTrainings.attended' => 1,
                 'Cat.level IN' => array('LEVEL 1','MYSPALIVE_S_HYBRID_TOX_FILLER_COURSE','MYSPALIVES_HYBRID_TOX_FILLER_COURSE'),
@@ -304,12 +310,12 @@ class CourseController extends AppPluginController {
             ->first();
 
         $hasBasic = !empty($level1);
-        if(!$hasBasic){
+        if (!$hasBasic) {
             $user_course_basic = $ref->DataCourses->find()->select(['CatCourses.type'])->join([
                 'CatCourses' => ['table' => 'cat_courses', 'type' => 'INNER', 'conditions' => 'CatCourses.id = DataCourses.course_id'],
             ])->where([
                 'CatCourses.type IN' => array('NEUROTOXINS BASIC', 'BOTH NEUROTOXINS'),
-                'DataCourses.user_id' => USER_ID,
+                'DataCourses.user_id' => $userId,
                 'DataCourses.deleted' => 0,
                 'DataCourses.status' => 'DONE'
             ])->first();
@@ -319,7 +325,7 @@ class CourseController extends AppPluginController {
         $level2 = $ref->DataTrainings->find()
             ->join(['Cat' => ['table' => 'cat_trainings', 'type' => 'INNER', 'conditions' => 'Cat.id = DataTrainings.training_id']])
             ->where([
-                'DataTrainings.user_id' => USER_ID,
+                'DataTrainings.user_id' => $userId,
                 'DataTrainings.deleted' => 0,
                 'DataTrainings.attended' => 1,
                 'Cat.level' => 'LEVEL 2',
@@ -328,12 +334,12 @@ class CourseController extends AppPluginController {
             ->first();
 
         $hasAdvanced = !empty($level2);
-        if(!$hasAdvanced){
+        if (!$hasAdvanced) {
             $user_course_advanced = $ref->DataCourses->find()->select(['CatCourses.type'])->join([
                 'CatCourses' => ['table' => 'cat_courses', 'type' => 'INNER', 'conditions' => 'CatCourses.id = DataCourses.course_id'],
             ])->where([
                 'CatCourses.type IN' => array('NEUROTOXINS ADVANCED', 'BOTH NEUROTOXINS'),
-                'DataCourses.user_id' => USER_ID,
+                'DataCourses.user_id' => $userId,
                 'DataCourses.deleted' => 0,
                 'DataCourses.status' => 'DONE'
             ])->first();
@@ -341,6 +347,61 @@ class CourseController extends AppPluginController {
         }
 
         return $hasBasic && $hasAdvanced;
+    }
+
+    public static function validateBasicAndAdvancedTraining($ref): bool {
+        return self::validateBasicAndAdvancedTrainingForUser($ref, (int)USER_ID);
+    }
+
+    /**
+     * Lookup sys_users by email and apply the same filler purchase prerequisites as validateBasicAndAdvancedTraining.
+     *
+     * @return array{user_found: bool, user_id: int|null, eligible: bool}
+     */
+    public static function validateBasicAndAdvancedTrainingForEmail($ref, string $email): array {
+        $email = trim($email);
+        if ($email === '') {
+            return ['user_found' => false, 'user_id' => null, 'eligible' => false];
+        }
+        $ref->loadModel('SpaLiveV1.SysUsers');
+        $entUser = $ref->SysUsers->find()
+            ->select(['SysUsers.id'])
+            ->where(['SysUsers.email' => $email, 'SysUsers.deleted' => 0])
+            ->first();
+        if (empty($entUser)) {
+            return ['user_found' => false, 'user_id' => null, 'eligible' => false];
+        }
+        $userId = (int)$entUser->id;
+
+        return [
+            'user_found' => true,
+            'user_id' => $userId,
+            'eligible' => self::validateBasicAndAdvancedTrainingForUser($ref, $userId),
+        ];
+    }
+
+    /**
+     * JSON: filler prerequisites by email (neurotoxin basic + advanced). Requires standard API key; no user token.
+     */
+    public function check_fillers_prerequisites_by_email(): void {
+        $allowedKey = '225sadfgasd123fgkhijjdsadfg16578g12gg3gh';
+        if (get('key', '') !== $allowedKey) {
+            $this->message('Invalid key.');
+            $this->success(false);
+            return;
+        }
+        $email = trim((string)get('email', ''));
+        if ($email === '') {
+            $this->message('email is required.');
+            $this->success(false);
+            return;
+        }
+
+        $result = self::validateBasicAndAdvancedTrainingForEmail($this, $email);
+        $this->set('user_found', $result['user_found']);
+        $this->set('user_id', $result['user_id']);
+        $this->set('eligible', $result['eligible']);
+        $this->success();
     }
 
     public function licence_types(){
