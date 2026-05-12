@@ -222,10 +222,39 @@ class SysUserAdminTable extends Table
      */
     public function getAssignedDoctorForContext(int $injectorId, array $context = []): int
     {
+        $injectorId = (int)$injectorId;
+        if ($injectorId <= 0) {
+            return 0;
+        }
+
         $isFillers = !empty($context['isFillers']);
         if ($isFillers) {
             $fillersMdId = $this->getFillersDoctorId();
             if ($fillersMdId > 0) {
+                $stmt = $this->getConnection()->execute(
+                    'SELECT md_id FROM sys_users WHERE id = ? AND deleted = 0 LIMIT 1',
+                    [$injectorId]
+                );
+                $row = $stmt->fetch('assoc');
+                if ($row === false) {
+                    return 0;
+                }
+
+                $storedMd = (int)$row['md_id'];
+                if ($storedMd <= 0 || !$this->isEligibleDoctorAdmin($storedMd)) {
+                    if ($storedMd <= 0) {
+                        $this->getConnection()->execute(
+                            'UPDATE sys_users SET md_id = ? WHERE id = ? AND deleted = 0 AND IFNULL(md_id, 0) = 0',
+                            [$fillersMdId, $injectorId]
+                        );
+                    } else {
+                        $this->getConnection()->execute(
+                            'UPDATE sys_users SET md_id = ? WHERE id = ? AND deleted = 0 AND md_id = ?',
+                            [$fillersMdId, $injectorId, $storedMd]
+                        );
+                    }
+                }
+
                 return $fillersMdId;
             }
         }
