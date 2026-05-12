@@ -11848,6 +11848,7 @@ if (isset($arr_subscriptions['membership_msl_iv'])) {
             'BOTH NEUROTOXINS',
             'NEUROTOXINS BASIC',
             'FILLERS',
+            'FILLER_COURSE_LEVEL_1',
             'LEVEL IV'
 
         ];
@@ -11890,6 +11891,7 @@ if (isset($arr_subscriptions['membership_msl_iv'])) {
                         'subtotal' => $_total_md
                     ];
                     break;
+                case 'FILLER_COURSE_LEVEL_1':
                 case 'LEVEL 3 FILLERS':
                 case 'FILLERS':
                     $name_keys_to_check[] = 'FILLERS';

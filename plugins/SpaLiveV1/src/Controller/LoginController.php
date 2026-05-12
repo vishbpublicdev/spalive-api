@@ -6926,7 +6926,11 @@ class LoginController extends AppPluginController{
         
         $FC = new FillersController();
         $has_filler_certificate = $FC->has_fillers_certificate(USER_ID);
+        $fillers_ci_restricted = $has_filler_certificate && $FC->fillersCiAccessIsRestricted(USER_ID);
         $body_areas = $FC->get_body_areas_fillers();
+        if ($fillers_ci_restricted) {
+            $body_areas = $FC->filterBodyAreasFillersToLipsOnly($body_areas);
+        }
         $areas_injector = array();
 
         // other courses validate
@@ -6965,15 +6969,16 @@ class LoginController extends AppPluginController{
                 'StateAvailability' => ['table' => 'data_treatments_enabled_by_state', 'type' => 'LEFT', 'conditions' => 'StateAvailability.treatment_id = CatCITreatments.id'],
             ])->all();
 
-            if(!empty($ent_treatments)){
-                foreach ($ent_treatments as $row) {     
+            $filler_ci_rows = [];
+            if (!empty($ent_treatments)) {
+                foreach ($ent_treatments as $row) {
                     $ent_treatments_price = $this->DataTreatmentsPrice->find()
                     ->where(['DataTreatmentsPrice.deleted' => 0,
                             'DataTreatmentsPrice.user_id' => USER_ID,
                              'DataTreatmentsPrice.treatment_id' => $row['id'],
                     ])->first();
 
-                    if(!empty($ent_treatments_price['alias'])){
+                    if (!empty($ent_treatments_price['alias'])) {
                         $row['name'] = $ent_treatments_price['alias'];
                     }
 
@@ -6984,7 +6989,7 @@ class LoginController extends AppPluginController{
                         $aux_description = $row['description'];
 
                         $aux_description = strtolower(trim($aux_description));
-                        
+
                         $description = $row['description'];
 
                         if (strpos($aux_description, "detail") !== false) {
@@ -7010,9 +7015,15 @@ class LoginController extends AppPluginController{
                         $t_array['qty'] = $row['qty'];
                         $t_array['ci_comission'] = intval($row['Product']['comission_spalive']);
                     }
-                    
-                    $result[] = $t_array;
+
+                    $filler_ci_rows[] = $t_array;
                 }
+            }
+            if ($fillers_ci_restricted) {
+                $filler_ci_rows = $FC->filterFillersCiTreatmentsForLevel1Course($filler_ci_rows);
+            }
+            foreach ($filler_ci_rows as $t_array) {
+                $result[] = $t_array;
             }
 
             $areas_injector_arr = $FC->get_body_areas_injector(USER_ID);            
@@ -7309,6 +7320,7 @@ class LoginController extends AppPluginController{
         }        
 
         $this->set('body_areas', $body_areas);
+        $this->set('fillers_ci_restricted', $fillers_ci_restricted);
         $this->set('data', $validated_result);
         $this->success();
     }
