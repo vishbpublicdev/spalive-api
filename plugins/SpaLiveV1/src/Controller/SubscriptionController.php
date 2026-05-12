@@ -991,6 +991,8 @@ class SubscriptionController extends AppPluginController {
                 $c_entity = $this->DataSubscriptions->newEntity($array_save);
                 if(!$c_entity->hasErrors()) {
                     $sub = $this->DataSubscriptions->save($c_entity);
+                    $this->loadModel('SpaLiveV1.SysUserAdmin');
+                    $payment_md_id = $this->SysUserAdmin->getAssignedDoctorForContext((int)USER_ID, ['isFillers' => true]);
                     $this->loadModel('SpaLiveV1.DataSubscriptionPayments');
                     $array_save = array(
                         'uid' => Text::uuid(),
@@ -1011,6 +1013,7 @@ class SubscriptionController extends AppPluginController {
                         'addons_services' => '',
                         'payment_details' => json_encode(array($main_service => $total_amount)),
                         'state' => USER_STATE,
+                        'md_id' => $payment_md_id,
                     );
 
                     $this->set('subscription_id', $sub->id);
