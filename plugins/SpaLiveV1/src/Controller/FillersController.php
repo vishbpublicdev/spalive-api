@@ -396,7 +396,18 @@ class FillersController extends AppPluginController {
         }));
     }
 
-   public function valid_step_application(
+    /**
+     * Shop inventory for users with only FILLER_COURSE_LEVEL_1: product `name` must match
+     * {@see FILLER_COURSE_LEVEL1_CI_TREATMENT_NAMES} (same rules as CI filter, no cat_treatments_ci lookup).
+     */
+    public function shopFillerProductAllowedForLevel1Catalog(string $productName): bool
+    {
+        return $this->filterFillersCiTreatmentsForLevel1Course([
+            ['name' => $productName, 'exam_name' => ''],
+        ]) !== [];
+    }
+
+    public function valid_step_application(
         $user_id
     ){
         $this->loadModel("SpaLiveV1.DataCourses");

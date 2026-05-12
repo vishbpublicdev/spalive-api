@@ -32,6 +32,7 @@ use \Firebase\JWT\Key;
 use SpaLiveV1\Controller\SubscriptionController;
 use SpaLiveV1\Controller\SummaryController;
 use SpaLiveV1\Controller\Data\ServicesHelper;
+use SpaLiveV1\Controller\FillersController;
 use SpaLiveV1\Controller\MailChimpController;
 
 //require_once(ROOT . DS . 'vendor' . DS  . 'Mailchimp' . DS . 'autoload.php');
@@ -15610,14 +15611,7 @@ class MainController extends AppPluginController {
 
         $shop_level_medical = empty($payment_advanced) ? false : true;
 
-        $shop_level_3 = false;
-
         $filler_check = $this->SysUsers->find()->select(['SysUsers.filler_check'])->where(['SysUsers.id' => USER_ID])->first();
-
-        if ($filler_check->filler_check == 1) {
-            $shop_level_3 = true;
-        }
-
 
         $reference = [
             // 'LASH_ENHACEMENT',
@@ -15693,6 +15687,16 @@ class MainController extends AppPluginController {
             // $allow_flip = true;
         }
 
+        $FC = new FillersController();
+        // Suscripción MD+FILLERS define si puede ver la categoría (igual que antes). El certificado/training
+        // solo acota el listado cuando aplica FILLER_COURSE_LEVEL_1 sin L2/L3/escuela/OT dinámico.
+        $allow_fillers_shop = $allow_fillers;
+        $filler_shop_restricted_level1 = $allow_fillers_shop
+            && USER_TYPE !== 'clinic'
+            && $FC->fillersCiAccessIsRestricted(USER_ID);
+        $filler_shop_full_access = $allow_fillers_shop && !$filler_shop_restricted_level1;
+        $shop_level_3 = $filler_shop_full_access || ((int)$filler_check->filler_check === 1);
+
         // if($e_user->subscriptions < 2) {
         //     $allow_neurotoxins = false;
         //     $allow_fillers = false;
@@ -15750,7 +15754,10 @@ class MainController extends AppPluginController {
 
             if ($row['category'] == 'MATERIALS' && !$allow_materials) continue;
             if ( ($row['category'] == 'NEUROTOXINS' || $row['category'] == 'NEUROTOXIN PACKAGES') && !$allow_neurotoxins) continue;
-            if ( ($row['category'] == 'FILLERS' || $row['category'] == 'FILLER PACKAGES') && !$allow_fillers) continue;
+            if ( ($row['category'] == 'FILLERS' || $row['category'] == 'FILLER PACKAGES') && !$allow_fillers_shop) continue;
+            if (($row['category'] == 'FILLERS' || $row['category'] == 'FILLER PACKAGES') && $filler_shop_restricted_level1 && !$FC->shopFillerProductAllowedForLevel1Catalog((string)$row['name'])) {
+                continue;
+            }
             if ($row['category'] == 'MISCELLANEOUS' && !$allow_miscellaneous) continue;
             if ($row['category'] == 'IV VIALS' && !$allow_ivt) continue;
             if (in_array($row['category'], ['ACNE PRODUCTS', 'BRIGHTENING PRODUCTS', 'ANTI-AGING PRODUCTS', 'BACKBAR PRODUCTS','SKIN PRODUCTS','SKIN KITS']) && !$allow_skin_products ) continue; 
@@ -15896,7 +15903,10 @@ class MainController extends AppPluginController {
             
             if ($row['category'] == 'MATERIALS' && !$allow_materials) continue;
             if ( ($row['category'] == 'NEUROTOXINS' || $row['category'] == 'NEUROTOXIN PACKAGES') && !$allow_neurotoxins) continue;
-            if ( ($row['category'] == 'FILLERS' || $row['category'] == 'FILLER PACKAGES') && !$allow_fillers) continue;
+            if ( ($row['category'] == 'FILLERS' || $row['category'] == 'FILLER PACKAGES') && !$allow_fillers_shop) continue;
+            if (($row['category'] == 'FILLERS' || $row['category'] == 'FILLER PACKAGES') && $filler_shop_restricted_level1 && !$FC->shopFillerProductAllowedForLevel1Catalog((string)$row['name'])) {
+                continue;
+            }
             if ($row['category'] == 'MISCELLANEOUS' && !$allow_miscellaneous) continue;
             if ($row['category'] == 'IV VIALS' && !$allow_ivt) continue;
             if (in_array($row['category'], ['ACNE PRODUCTS', 'BRIGHTENING PRODUCTS', 'ANTI-AGING PRODUCTS', 'BACKBAR PRODUCTS','SKIN PRODUCTS']) && !$allow_skin_products ) continue; 
