@@ -39,6 +39,44 @@ class TreatmentsController extends AppPluginController{
         return $this->mailgunKey;
     }
 
+    private function treatmentStringContainsFillers(string $stringTreatments): bool
+    {
+        $rawIds = array_filter(array_map('trim', explode(',', $stringTreatments)), static fn ($id) => $id !== '');
+        $treatmentIds = array_values(array_filter(array_map('intval', $rawIds), static fn ($id) => $id > 0));
+        if ($treatmentIds === []) {
+            return false;
+        }
+
+        $this->loadModel('SpaLiveV1.CatTreatmentsCi');
+        $match = $this->CatTreatmentsCi->find()
+            ->select(['CatTreatmentsCi.id'])
+            ->join([
+                'Category' => [
+                    'table' => 'cat_treatments_category',
+                    'type' => 'INNER',
+                    'conditions' => 'Category.id = CatTreatmentsCi.category_treatment_id',
+                ],
+            ])
+            ->where([
+                'CatTreatmentsCi.id IN' => $treatmentIds,
+                'CatTreatmentsCi.deleted' => 0,
+                'Category.type' => 'FILLERS',
+            ])
+            ->first();
+
+        return !empty($match);
+    }
+
+    private function resolveAssignedDoctorByTreatments(int $assistanceId, string $stringTreatments): int
+    {
+        $isFillersTreatment = $this->treatmentStringContainsFillers($stringTreatments);
+        if ($isFillersTreatment) {
+            return $this->SysUserAdmin->getAssignedDoctorForContext($assistanceId, ['isFillers' => true]);
+        }
+
+        return $this->SysUserAdmin->getRandomDoctor($assistanceId);
+    }
+
 	public function initialize() : void{
         parent::initialize();
         date_default_timezone_set("America/Chicago");
@@ -443,7 +481,7 @@ class TreatmentsController extends AppPluginController{
         }
 
         //$assigned_doctor = rand(0,1) == 0 ? 'Dr Zach Cannon' : 'Dr Doohi Lee';
-        $assigned_doctor = $this->SysUserAdmin->getRandomDoctor($assistance_id);
+        $assigned_doctor = $this->resolveAssignedDoctorByTreatments((int)$assistance_id, (string)$string_treatments);
         
 
         if (empty($schedule_date)) 
@@ -765,7 +803,7 @@ class TreatmentsController extends AppPluginController{
         #endregion  
 
         //$assigned_doctor = rand(0,1) == 0 ? 'Dr Zach Cannon' : 'Dr Doohi Lee';
-        $assigned_doctor = $this->SysUserAdmin->getRandomDoctor($assistance_id);
+        $assigned_doctor = $this->resolveAssignedDoctorByTreatments((int)$assistance_id, (string)$string_treatments);
         
 
         if (empty($schedule_date)) 
@@ -952,7 +990,7 @@ class TreatmentsController extends AppPluginController{
         if(empty($entity)){
 
             //$assigned_doctor = rand(0,1) == 0 ? 'Dr Zach Cannon' : 'Dr Doohi Lee';
-            $assigned_doctor = $this->SysUserAdmin->getRandomDoctor($assistance_id);
+            $assigned_doctor = $this->resolveAssignedDoctorByTreatments((int)$assistance_id, (string)$string_treatments);
             
             $array_save = array(
                 'uid' => $treatment_uid,
@@ -3991,7 +4029,7 @@ class TreatmentsController extends AppPluginController{
         $treatment_uid = Text::uuid();
         
         //$assigned_doctor = rand(0,1) == 0 ? 'Dr Zach Cannon' : 'Dr Doohi Lee';
-        $assigned_doctor = $this->SysUserAdmin->getRandomDoctor($assistance_id);
+        $assigned_doctor = $this->resolveAssignedDoctorByTreatments((int)$assistance_id, (string)$string_treatments);
         
 
         if (empty($schedule_date)) 
@@ -7393,7 +7431,7 @@ class TreatmentsController extends AppPluginController{
             }
         }
 
-        $assigned_doctor = $this->SysUserAdmin->getRandomDoctor($assistance_id);        
+        $assigned_doctor = $this->resolveAssignedDoctorByTreatments((int)$assistance_id, (string)$string_treatments);        
 
         $created = date('Y-m-d H:i:s');
         $array_save = array(
