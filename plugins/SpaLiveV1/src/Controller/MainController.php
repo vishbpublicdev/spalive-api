@@ -23359,7 +23359,7 @@ class MainController extends AppPluginController {
                         'State' => ['table' => 'cat_states', 'type' => 'INNER', 'conditions' => 'State.id = CatTrainigs.state_id']
                     ];
                 
-                $_where = ['DataTrainigs.user_id' => USER_ID, 'DataTrainigs.deleted' => 0, 'CatTrainigs.deleted' => 0,'(DATE_FORMAT(CatTrainigs.scheduled, "%Y-%m-%d 09:00:00") < "' . $now . '")', 'CatTrainigs.level' => 'LEVEL 3 FILLERS'];
+                $_where = ['DataTrainigs.user_id' => USER_ID, 'DataTrainigs.deleted' => 0, 'CatTrainigs.deleted' => 0,'(DATE_FORMAT(CatTrainigs.scheduled, "%Y-%m-%d 09:00:00") < "' . $now . '")', 'CatTrainigs.level IN' => ['LEVEL 3 FILLERS','FILLER_COURSE_LEVEL_1']];
 
                 $done_trainings = $this->CatTrainigs->find()->select($_fields)
                 ->join($_join)
@@ -23398,7 +23398,7 @@ class MainController extends AppPluginController {
                         'DataTrainigs' => ['table' => 'data_trainings', 'type' => 'INNER', 'conditions' => 'CatTrainigs.id = DataTrainigs.training_id'],
                         'State' => ['table' => 'cat_states', 'type' => 'INNER', 'conditions' => 'State.id = CatTrainigs.state_id']
                     ];
-                    $_where = ['DataTrainigs.user_id' => USER_ID, 'DataTrainigs.deleted' => 0, 'CatTrainigs.deleted' => 0,'(DATE_FORMAT(CatTrainigs.scheduled, "%Y-%m-%d 09:00:00") > "' . $now . '")', 'CatTrainigs.level' => 'LEVEL 3 FILLERS'];
+                    $_where = ['DataTrainigs.user_id' => USER_ID, 'DataTrainigs.deleted' => 0, 'CatTrainigs.deleted' => 0,'(DATE_FORMAT(CatTrainigs.scheduled, "%Y-%m-%d 09:00:00") > "' . $now . '")', 'CatTrainigs.level IN' => ['LEVEL 3 FILLERS','FILLER_COURSE_LEVEL_1']];
 
                     
                     $enrolled_trainings  = $this->CatTrainigs->find()->select($_fields)
@@ -23432,7 +23432,7 @@ class MainController extends AppPluginController {
                             $_join = [
                                 'State' => ['table' => 'cat_states', 'type' => 'INNER', 'conditions' => 'State.id = CatTrainigs.state_id']
                             ];
-                            $_where = ['CatTrainigs.scheduled >' => $now, 'CatTrainigs.deleted' => 0, 'CatTrainigs.deleted' => 0, 'CatTrainigs.level' => 'LEVEL 3 FILLERS'];
+                            $_where = ['CatTrainigs.scheduled >' => $now, 'CatTrainigs.deleted' => 0, 'CatTrainigs.deleted' => 0, 'CatTrainigs.level IN' => ['LEVEL 3 FILLERS','FILLER_COURSE_LEVEL_1']];
 
                             $trainingsavailable  = $this->CatTrainigs->find()->select($fields)
                             ->join($_join)
