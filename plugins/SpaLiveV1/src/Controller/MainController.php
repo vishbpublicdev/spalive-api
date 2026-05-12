@@ -36612,7 +36612,7 @@ class MainController extends AppPluginController {
                     break;
                 case 'COURSE_FILLERS_LEVEL_1':
                 case 'FILLER_COURSE_LEVEL_1':
-                    $type_string = 'FILLER_COURSE_LEVEL_1';
+                    $type_string = 'FILLERS COURSE';
                     break;
                 case 'COURSE_FILLERS_LEVEL_2':
                 case 'FILLER_COURSE_LEVEL_2':
