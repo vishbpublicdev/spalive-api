@@ -1202,6 +1202,24 @@ class CourseController extends AppPluginController {
                     'data_training_id' => $training_fillers['data_training_id'],
                     'attended' => $training_fillers['attended'],
                 );
+                
+                $data = array(
+                        [
+                            'title' => 'Bloodborne Pathogen Safety Answer Key',
+                            'url' => Configure::read('App.wordpress_domain') . '/wp-content/uploads/Bloodborne_Pathogen_Safety_Answer_Key.pdf',
+                            'type' => 'pdf'
+                        ],
+                        [
+                            'title' => 'Bloodborne Pathogen Safety Training',
+                            'url' => Configure::read('App.wordpress_domain') . '/wp-content/uploads/Bloodborne_Pathogen_Safety_Training.pdf',
+                            'type' => 'pdf'
+                        ],
+                        [
+                            'title' => 'Filler Course Level 1 Pre-Course Study Material',
+                            'url' => Configure::read('App.wordpress_domain') . '/wp-content/uploads/Filler_Course_Level_1_Pre-Course_Study_Material.pdf',
+                            'type' => 'pdf'
+                        ]
+                    );
             }
 
             $this->set('training', $res);
@@ -2738,6 +2756,21 @@ class CourseController extends AppPluginController {
                                 'title' => 'How to use the App',
                                 'url' => Configure::read('App.wordpress_domain') . '/wp-content/uploads/howtouse.mp4',
                                 'type' => 'video'
+                            ],
+                            [
+                                'title' => 'Bloodborne Pathogen Safety Answer Key',
+                                'url' => Configure::read('App.wordpress_domain') . '/wp-content/uploads/Bloodborne_Pathogen_Safety_Answer_Key.pdf',
+                                'type' => 'pdf'
+                            ],
+                            [
+                                'title' => 'Bloodborne Pathogen Safety Training',
+                                'url' => Configure::read('App.wordpress_domain') . '/wp-content/uploads/Bloodborne_Pathogen_Safety_Training.pdf',
+                                'type' => 'pdf'
+                            ],
+                            [
+                                'title' => 'Filler Course Level 1 Pre-Course Study Material',
+                                'url' => Configure::read('App.wordpress_domain') . '/wp-content/uploads/Filler_Course_Level_1_Pre-Course_Study_Material.pdf',
+                                'type' => 'pdf'
                             ]
                         ),
                         'ot' => 0,
@@ -2779,6 +2812,21 @@ class CourseController extends AppPluginController {
                                 'title' => 'How to use the App',
                                 'url' => Configure::read('App.wordpress_domain') . '/wp-content/uploads/howtouse.mp4',
                                 'type' => 'video'
+                            ],
+                            [
+                                'title' => 'Bloodborne Pathogen Safety Answer Key',
+                                'url' => Configure::read('App.wordpress_domain') . '/wp-content/uploads/Bloodborne_Pathogen_Safety_Answer_Key.pdf',
+                                'type' => 'pdf'
+                            ],
+                            [
+                                'title' => 'Bloodborne Pathogen Safety Training',
+                                'url' => Configure::read('App.wordpress_domain') . '/wp-content/uploads/Bloodborne_Pathogen_Safety_Training.pdf',
+                                'type' => 'pdf'
+                            ],
+                            [
+                                'title' => 'Filler Course Level 1 Pre-Course Study Material',
+                                'url' => Configure::read('App.wordpress_domain') . '/wp-content/uploads/Filler_Course_Level_1_Pre-Course_Study_Material.pdf',
+                                'type' => 'pdf'
                             ]
                         ),
                         'ot' => 0,
