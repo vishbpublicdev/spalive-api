@@ -6645,18 +6645,20 @@ class LoginController extends AppPluginController{
             );
         }
 
-        $string_prices = get('services','');
-        $string_prices_names = get('services_name','');
-        
-        $arr_prices = explode('|', $string_prices);
-        $arr_prices_names = explode('|', $string_prices_names);
+        $string_prices = get('services', '');
+        $string_prices_names = get('services_name', '');
 
-        $has_names = empty($arr_prices_names);
-        if ($model == "injector" && empty($arr_prices)) {
+        $arr_prices = array_values(array_filter(array_map('trim', explode('|', (string)$string_prices)), static function ($chunk) {
+            return $chunk !== '';
+        }));
+        $arr_prices_names = array_values(array_filter(array_map('trim', explode('|', (string)$string_prices_names)), static function ($chunk) {
+            return $chunk !== '';
+        }));
+
+        if ($model === 'injector' && count($arr_prices) === 0) {
             $this->message('Invalid services string format.');
             return;
         }
-        
 
         $array_save = array(
                 'id' => USER_ID,
@@ -6740,6 +6742,23 @@ class LoginController extends AppPluginController{
             $this->loadModel('SpaLiveV1.DataTreatmentsPrice');
             $servicesPriceEligibility = new ServicesHelper(USER_ID);
 
+            $saveable_price_rows = [];
+            foreach ($arr_prices as $index => $row) {
+                $arr_inter = array_map('trim', explode(',', $row));
+                if (count($arr_inter) < 2 || $arr_inter[0] === '' || $arr_inter[1] === '') {
+                    continue;
+                }
+                if (!$servicesPriceEligibility->injector_may_set_price_for_ci_treatment((int)$arr_inter[0])) {
+                    continue;
+                }
+                $saveable_price_rows[] = ['index' => $index, 'inter' => $arr_inter];
+            }
+
+            if (count($arr_prices) > 0 && count($saveable_price_rows) === 0) {
+                $this->message('No service prices could be saved. Check id,price format, or complete the required subscription step for those treatments.');
+                return;
+            }
+
             if (count($arr_prices) > 0) {
                 $str_query_delete = "
                     UPDATE data_treatments_prices SET deleted = 1 WHERE user_id = " . USER_ID;
@@ -6748,17 +6767,15 @@ class LoginController extends AppPluginController{
 
             $services_array = array();
 
-            foreach ($arr_prices as $index => $row) {
-                // services: id,price|id,price
-                $arr_inter = explode(",", $row);
-            
-               
-            
-                if (!empty($arr_inter[0]) && !$servicesPriceEligibility->injector_may_set_price_for_ci_treatment((int)$arr_inter[0])) {
-                    continue;
-                }
+            foreach ($saveable_price_rows as $saveable) {
+                $index = $saveable['index'];
+                $arr_inter = $saveable['inter'];
 
-                $p_entity = $this->DataTreatmentsPrice->find()->where(['DataTreatmentsPrice.treatment_id' => $arr_inter[0], 'DataTreatmentsPrice.user_id' => USER_ID])->first();
+                $p_entity = $this->DataTreatmentsPrice->find()->where([
+                    'DataTreatmentsPrice.treatment_id' => $arr_inter[0],
+                    'DataTreatmentsPrice.user_id' => USER_ID,
+                    'DataTreatmentsPrice.deleted' => 0,
+                ])->first();
             
                 if (!empty($p_entity)) {
                     $p_id = $p_entity->id;
@@ -6781,30 +6798,28 @@ class LoginController extends AppPluginController{
                     }
                 }
 
-                if($service_name == ''){
-                    if(!empty($p_entity['alias'])){
-                        $service_name = $p_entity['alias'];
-
-                    }
+                if ($service_name === '' && $p_entity !== null && !empty($p_entity->alias)) {
+                    $service_name = $p_entity->alias;
                 }
 
             
-                if(!empty($arr_inter[0]) && !empty($arr_inter[1])){
-                    $arr_save_q = [
-                        'id' => $p_id,
-                        'user_id' => USER_ID,
-                        'treatment_id' => $arr_inter[0],
-                        'price' => $arr_inter[1],
-                        'alias' => $service_name, // Agregar el nombre del servicio aquí
-                        'deleted' => 0,
-                    ];
-            
-                    $cq_entity = $this->DataTreatmentsPrice->newEntity($arr_save_q);
-                    if (!$cq_entity->hasErrors()) {
-                        $this->DataTreatmentsPrice->save($cq_entity);
-                    }
-
+                $arr_save_q = [
+                    'user_id' => USER_ID,
+                    'treatment_id' => $arr_inter[0],
+                    'price' => $arr_inter[1],
+                    'alias' => $service_name,
+                    'deleted' => 0,
+                    'createdby' => USER_ID,
+                ];
+                if (!empty($p_id)) {
+                    $arr_save_q['id'] = $p_id;
                 }
+
+                $cq_entity = $this->DataTreatmentsPrice->newEntity($arr_save_q);
+                if (!$cq_entity->hasErrors()) {
+                    $this->DataTreatmentsPrice->save($cq_entity);
+                }
+
             }
 
             // $this->loadModel('SpaLiveV1.DataTreatment');

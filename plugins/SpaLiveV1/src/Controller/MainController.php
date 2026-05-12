@@ -19829,14 +19829,15 @@ class MainController extends AppPluginController {
         //     return;
         // }
 
-        $string_prices = get('services','');
-        
-        $arr_prices = explode('|', $string_prices);
-        if ($model == "injector" && empty($arr_prices)) {
+        $string_prices = get('services', '');
+
+        $arr_prices = array_values(array_filter(array_map('trim', explode('|', (string)$string_prices)), static function ($chunk) {
+            return $chunk !== '';
+        }));
+        if ($model === 'injector' && count($arr_prices) === 0) {
             $this->message('Invalid services string format.');
             return;
         }
-        
 
         $array_save = array(
                 'id' => USER_ID,
@@ -19917,6 +19918,23 @@ class MainController extends AppPluginController {
             $this->loadModel('SpaLiveV1.DataTreatmentsPrice');
             $servicesPriceEligibility = new ServicesHelper(USER_ID);
 
+            $saveable_price_rows = [];
+            foreach ($arr_prices as $row) {
+                $arr_inter = array_map('trim', explode(',', $row));
+                if (count($arr_inter) < 2 || $arr_inter[0] === '' || $arr_inter[1] === '') {
+                    continue;
+                }
+                if (!$servicesPriceEligibility->injector_may_set_price_for_ci_treatment((int)$arr_inter[0])) {
+                    continue;
+                }
+                $saveable_price_rows[] = ['inter' => $arr_inter];
+            }
+
+            if (count($arr_prices) > 0 && count($saveable_price_rows) === 0) {
+                $this->message('No service prices could be saved. Check id,price format, or complete the required subscription step for those treatments.');
+                return;
+            }
+
             if (count($arr_prices) > 0) {
                 $str_query_delete = "
                     UPDATE data_treatments_prices SET deleted = 1 WHERE user_id = " . USER_ID;
@@ -19925,18 +19943,15 @@ class MainController extends AppPluginController {
 
             $services_array = array();
 
-            foreach ($arr_prices as $row) {
-                // services: id,price|id,price
-                $arr_inter = explode(",",$row);
-
-                if (count($arr_inter) < 2) continue;
-
-                if (!$servicesPriceEligibility->injector_may_set_price_for_ci_treatment((int)$arr_inter[0])) {
-                    continue;
-                }
+            foreach ($saveable_price_rows as $saveable) {
+                $arr_inter = $saveable['inter'];
 
                 
-                $p_entity = $this->DataTreatmentsPrice->find()->where(['DataTreatmentsPrice.treatment_id' => $arr_inter[0],'DataTreatmentsPrice.user_id' => USER_ID])->first();
+                $p_entity = $this->DataTreatmentsPrice->find()->where([
+                    'DataTreatmentsPrice.treatment_id' => $arr_inter[0],
+                    'DataTreatmentsPrice.user_id' => USER_ID,
+                    'DataTreatmentsPrice.deleted' => 0,
+                ])->first();
 
                 if (!empty($p_entity)) 
                     $p_id = $p_entity->id;
@@ -19946,12 +19961,16 @@ class MainController extends AppPluginController {
                 $services_array[] = $arr_inter[0];
 
                 $arr_save_q = array(
-                    'id' => $p_id,
                     'user_id' => USER_ID,
                     'treatment_id' => $arr_inter[0],
                     'price' => $arr_inter[1],
+                    'alias' => '',
                     'deleted' => 0,
+                    'createdby' => USER_ID,
                 );
+                if (!empty($p_id)) {
+                    $arr_save_q['id'] = $p_id;
+                }
                 
 
                 $cq_entity = $this->DataTreatmentsPrice->newEntity($arr_save_q);
