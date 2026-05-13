@@ -5222,6 +5222,7 @@ class SubscriptionController extends AppPluginController {
             'LEVEL 3 MEDICAL',
             'LEVEL 2',
             'LEVEL 3 FILLERS',
+            'FILLER_COURSE_LEVEL_1',
             'LEVEL 1-1 NEUROTOXINS',
             //'MYSPALIVE_S_HYBRID_TOX_FILLER_COURSE',
             //'MYSPALIVES_HYBRID_TOX_FILLER_COURSE',
@@ -5240,6 +5241,7 @@ class SubscriptionController extends AppPluginController {
                     $array_md = ['NEUROTOXINS'];
                     break;
                 case 'LEVEL 3 FILLERS':
+                case 'FILLER_COURSE_LEVEL_1':
                 case 'FILLERS':
                     $array_md = ['FILLERS'];
                     break;
