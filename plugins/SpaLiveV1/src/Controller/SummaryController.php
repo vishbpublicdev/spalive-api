@@ -7762,7 +7762,7 @@ class SummaryController extends AppPluginController{
                     $arr_options = [$cat_key];
                     if ($cat_key == 'LEVEL 1') $arr_options = ['LEVEL 1', 'MYSPALIVES_HYBRID_TOX_FILLER_COURSE','MYSPALIVE_S_HYBRID_TOX_FILLER_COURSE'];
                     if ($cat_key == 'LEVEL 2') $arr_options = ['LEVEL 2', 'LEVEL_TWO_DUAL_TOX_AND_DEMALL_FILLER'];
-                    if ($cat_key == 'FILLERS') $arr_options = ['FILLERS', 'LEVEL_TWO_DUAL_TOX_AND_DEMALL_FILLER','MYSPALIVES_HYBRID_TOX_FILLER_COURSE','MYSPALIVE_S_HYBRID_TOX_FILLER_COURSE'];
+                    if ($cat_key == 'FILLERS')  $arr_options = ['FILLERS', 'LEVEL_TWO_DUAL_TOX_AND_DEMALL_FILLER','MYSPALIVES_HYBRID_TOX_FILLER_COURSE','MYSPALIVE_S_HYBRID_TOX_FILLER_COURSE', 'LEVEL 3 FILLERS','FILLER_COURSE_LEVEL_1'];
                     if ($cat_key == 'LEVEL 3 FILLERS') $arr_options = ['FILLERS', 'LEVEL_TWO_DUAL_TOX_AND_DEMALL_FILLER','MYSPALIVES_HYBRID_TOX_FILLER_COURSE','MYSPALIVE_S_HYBRID_TOX_FILLER_COURSE', 'LEVEL 3 FILLERS','FILLER_COURSE_LEVEL_1'];
                     // Obtener todos los entrenamientos del usuario con información del curso
                     $ent_data_training = $this->DataTrainings->find()->select(['CatTrainigs.id','DataTrainings.id'])->join([
