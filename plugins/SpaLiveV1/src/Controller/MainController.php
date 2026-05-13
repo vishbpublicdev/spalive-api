@@ -15909,7 +15909,7 @@ class MainController extends AppPluginController {
             }
             if ($row['category'] == 'MISCELLANEOUS' && !$allow_miscellaneous) continue;
             if ($row['category'] == 'IV VIALS' && !$allow_ivt) continue;
-            if (in_array($row['category'], ['ACNE PRODUCTS', 'BRIGHTENING PRODUCTS', 'ANTI-AGING PRODUCTS', 'BACKBAR PRODUCTS','SKIN PRODUCTS']) && !$allow_skin_products ) continue; 
+            if (in_array($row['category'], ['ACNE PRODUCTS', 'BRIGHTENING PRODUCTS', 'ANTI-AGING PRODUCTS', 'BACKBAR PRODUCTS','SKIN PRODUCTS','SKIN KITS']) && !$allow_skin_products ) continue; 
             // Producto 394: requiere training LEVEL_TWO_DUAL_TOX_AND_DEMALL_FILLER + suscripción a FILLERS y NEUROTOXINS
             if ($row['id'] == 394 && !$allow_product_394) continue;
             //if ($row['category'] == 'IV VIALS') continue;
