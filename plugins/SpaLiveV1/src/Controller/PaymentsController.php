@@ -5952,8 +5952,8 @@ class PaymentsController extends AppPluginController{
                             <div style='width:210mm; height: 97mm; position:absolute; z-index: 2;'>
                                 
                                 <div style='position: absolute;left: 10mm;top: 20mm; max-width: 80mm; background-color: white'>".$payers_name_and_address."</div>
-                                <div style='position: absolute;left: 55mm;top: 41.5mm; max-width: 35mm; background-color: white'>".$payer_tin."</div>                                
-                                <div style='position: absolute;left: 10mm;top: 41.5mm; max-width: 35mm; background-color: white'>".$receipt_tin."</div>                                
+                                <div style='position: absolute;left: 55mm;top: 41.5mm; max-width: 35mm; background-color: white'>".$receipt_tin."</div>                                
+                                <div style='position: absolute;left: 10mm;top: 41.5mm; max-width: 35mm; background-color: white'>".$payer_tin."</div>                                
                                 <div style='position: absolute;left: 10mm;top: 53mm; max-width: 80mm; background-color: white'>".$recipient_name."</div>
                                 <div style='position: absolute;left: 10mm;top: 64mm; max-width: 80mm; background-color: white'>".$recipient_street."</div>
                                 <div style='position: absolute;left: 10mm;top: 72.5mm; max-width: 80mm; background-color: white'>".$recipient_city."</div>
