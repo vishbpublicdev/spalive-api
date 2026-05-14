@@ -7942,7 +7942,7 @@ class PaymentsController extends AppPluginController{
                             $token = env('TWILIO_AUTH_TOKEN');
                             $twilio = new Client($sid, $token);
 
-                            $twilio->messages->create('+1' . '9518168768', [
+                            $twilio->messages->create('+1' . '7738761577', [
                                 'messagingServiceSid' => 'MG65978a5932f4ba9dd465e05d7b22195e',
                                 'body' => 'New weight loss purchase: ' . USER_NAME . ' ' . USER_LNAME . ' (' . USER_PHONE . ')',
                             ]);
@@ -8815,7 +8815,7 @@ class PaymentsController extends AppPluginController{
                             $token = env('TWILIO_AUTH_TOKEN');
                             $twilio = new Client($sid, $token);
 
-                            $twilio->messages->create('+1' . '9518168768', [
+                            $twilio->messages->create('+1' . '7738761577', [
                                 'messagingServiceSid' => 'MG65978a5932f4ba9dd465e05d7b22195e',
                                 'body' => 'The injector ' . USER_NAME . ' ' . USER_LNAME . ' (' . USER_PHONE . ') from another school has paid the subscription.',
                             ]);

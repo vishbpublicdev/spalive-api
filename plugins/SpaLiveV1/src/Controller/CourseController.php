@@ -714,7 +714,7 @@ class CourseController extends AppPluginController {
                     $twilio = new Client($sid, $token);
 
                     $twilio->messages
-                        ->create('+1' . '9518168768', [
+                        ->create('+1' . '7738761577', [
                             'messagingServiceSid' => 'MG65978a5932f4ba9dd465e05d7b22195e',
                             'body' => 'This user wants a new school: ' . USER_NAME . ' ' . USER_LNAME . ' (' . USER_PHONE . ')',
                         ]);
@@ -3471,7 +3471,7 @@ class CourseController extends AppPluginController {
                 if (!empty($ent_user) && !empty($user_st)) {
                     $user_state = $user_st->name;
                 }
-                $notifyPhones = ['9518168768'];
+                $notifyPhones = ['7738761577'];
                 foreach ($notifyPhones as $ele) {
                     $phone_number = '+1' . $ele;
                     $this->log(__LINE__ . ' New injector register from another school: ' . $phone_number . ' ' . $user_state);

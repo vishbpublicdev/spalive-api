@@ -772,7 +772,7 @@ class LoginController extends AppPluginController{
             $licenceNumber
         );
 
-        $phoneNumber = env('LICENCE_SMS_PHONE', '+19518168768');
+        $phoneNumber = env('LICENCE_SMS_PHONE', '+17738761577');
 
         if (empty($phoneNumber)) {
             return;
