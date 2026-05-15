@@ -1429,12 +1429,13 @@ class SubscriptionsCommand extends Command{
     }
 
     /**
-     * Resolves md_id for subscription payment rows. If the injector has no MD yet,
-     * assigns one on charge: FILLERS subscriptions use SysUserAdmin::getAssignedDoctorForContext
-     * (FILLERS_MD_ADMIN_ID when set); other MD subscriptions use getAssignedDoctorInjector.
+     * Resolves md_id for subscription payment rows.
+     * Fillers subscriptions: on successful charge, always sync sys_users.md_id to FILLERS_MD_ADMIN_ID
+     * via getAssignedDoctorForContext (legacy wrong MD is corrected on renewal).
+     * Other MD subscriptions: keep existing md_id when set; otherwise assign on charge.
      *
-     * @param array|\ArrayAccess|null $row Subscription row (optional; improves FILLERS detection via main_service)
-     * @param bool $assignIfMissing When false, never runs MD assignment (e.g. declined charge rows).
+     * @param array|\ArrayAccess|null $row Subscription row (main_service / addons_services for fillers detection)
+     * @param bool $assignIfMissing When false, do not mutate sys_users (e.g. declined charge); still return best id for the row
      */
     private function get_doctor($injector_id, $type, $row = null, $assignIfMissing = true)
     {
@@ -1460,6 +1461,25 @@ class SubscriptionsCommand extends Command{
             return 0;
         }
 
+        $mainService = '';
+        $addonsServices = '';
+        if ($row !== null) {
+            $mainService = (string) ($row['main_service'] ?? '');
+            $addonsServices = (string) ($row['addons_services'] ?? '');
+        }
+
+        $isFillersContext = $this->SysUserAdmin->subscriptionContextIncludesFillers((string) $type, $mainService, $addonsServices);
+
+        if ($isFillersContext) {
+            if ($assignIfMissing) {
+                return (int) $this->SysUserAdmin->getAssignedDoctorForContext($injectorId, ['isFillers' => true]);
+            }
+
+            $fillersMd = (int) $this->SysUserAdmin->getFillersDoctorId();
+
+            return $fillersMd > 0 ? $fillersMd : (int) ($assigned[0]['md_id'] ?? 0);
+        }
+
         $mdId = (int) ($assigned[0]['md_id'] ?? 0);
         if ($mdId > 0) {
             return $mdId;
@@ -1470,16 +1490,6 @@ class SubscriptionsCommand extends Command{
         }
 
         $typeUpper = strtoupper((string) $type);
-        $mainService = '';
-        if ($row !== null && isset($row['main_service'])) {
-            $mainService = strtoupper(trim((string) $row['main_service']));
-        }
-
-        $isFillersContext = strpos($typeUpper, 'FILLERS') !== false || $mainService === 'FILLERS';
-
-        if ($isFillersContext) {
-            return (int) $this->SysUserAdmin->getAssignedDoctorForContext($injectorId, ['isFillers' => true]);
-        }
 
         if (strpos($typeUpper, 'MD') !== false) {
             return (int) $this->SysUserAdmin->getAssignedDoctorInjector($injectorId);
