@@ -1004,7 +1004,9 @@ class CourseController extends AppPluginController {
                 'title' => $training['title'],
                 'scheduled' => $training['scheduled']->i18nFormat('yyyy-MM-dd hh:mm a'),
                 'address' => $address,
-                'level' => $training['level'],
+                'level' => in_array((string)$training['level'], ['FILLER_COURSE_LEVEL_1', 'LEVEL 3 FILLERS'], true)
+                    ? 'Filler Level 1'
+                    : (string)$training['level'],
                 'data_training_id' => $training['data_training_id']
             );
 
@@ -1198,7 +1200,9 @@ class CourseController extends AppPluginController {
                     'title' => $training_fillers['title'],
                     'scheduled' => $training_fillers['scheduled']->i18nFormat('yyyy-MM-dd hh:mm a'),
                     'address' => $address,
-                    'level' => $training_fillers['level'],
+                    'level' => in_array((string)$training_fillers['level'], ['FILLER_COURSE_LEVEL_1', 'LEVEL 3 FILLERS'], true)
+                        ? 'Filler Level 1'
+                        : (string)$training_fillers['level'],
                     'data_training_id' => $training_fillers['data_training_id'],
                     'attended' => $training_fillers['attended'],
                 );
@@ -1669,7 +1673,9 @@ class CourseController extends AppPluginController {
                         'title' => $ent_training_fillers['title'],
                         'scheduled' => $ent_training_fillers['scheduled']->i18nFormat('yyyy-MM-dd hh:mm a'),
                         'address' => $address,
-                        'level' => $ent_training_fillers['level'],
+                        'level' => in_array((string)$ent_training_fillers['level'], ['FILLER_COURSE_LEVEL_1', 'LEVEL 3 FILLERS'], true)
+                            ? 'Filler Level 1'
+                            : (string)$ent_training_fillers['level'],
                         'data_training_id' => $ent_training_fillers['data_training_id'],
                         'attended' => $fillerAttendedNormLegacy,
                         'show_cancel' => false,
@@ -1703,7 +1709,7 @@ class CourseController extends AppPluginController {
                     'title' => 'Filler Foundations Course',
                     'scheduled' => 'Date selection',
                     'address' => 'Class date and location to be defined.',
-                    'level' => 'LEVEL 3 FILLERS',
+                    'level' => 'Filler Level 1',
                     'data_training_id' => '',
                     'attended' => '0',
                     'show_cancel' => false,
@@ -2742,7 +2748,9 @@ class CourseController extends AppPluginController {
                         'title' => $ent_training_fillers['title'],
                         'scheduled' => $ent_training_fillers['scheduled']->i18nFormat('yyyy-MM-dd hh:mm a'),
                         'address' => $address,
-                        'level' => $ent_training_fillers['level'],
+                        'level' => in_array((string)$ent_training_fillers['level'], ['FILLER_COURSE_LEVEL_1', 'LEVEL 3 FILLERS'], true)
+                            ? 'Filler Level 1'
+                            : (string)$ent_training_fillers['level'],
                         'data_training_id' => $ent_training_fillers['data_training_id'],
                         'attended' => $fillerAttendedNorm,
                         'show_cancel' => false,
