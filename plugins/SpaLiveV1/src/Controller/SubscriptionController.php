@@ -683,13 +683,17 @@ class SubscriptionController extends AppPluginController {
         $this->set('subscription_id', $saved->id);
 
         if ($addPayment && $addPayment !== '0' && $addPayment !== false) {
-            // Same as insert_subscription_by_values / save_subscription after Stripe: assign MD when missing
-            if (stripos($subscriptionType, 'MD') !== false) {
+            $mdIdPayment = 0;
+            if ($this->SysUserAdmin->subscriptionContextIncludesFillers($subscriptionType, $mainService, '')) {
+                $mdIdPayment = (int)$this->SysUserAdmin->getAssignedDoctorForContext((int)$userId, ['isFillers' => true]);
+            } elseif (stripos($subscriptionType, 'MD') !== false) {
                 $this->SysUserAdmin->getAssignedDoctorInjector((int)$userId);
+                $userFresh = $this->SysUsers->get($userId);
+                $mdIdPayment = (int)($userFresh->md_id ?? 0);
+            } else {
+                $userFresh = $this->SysUsers->get($userId);
+                $mdIdPayment = (int)($userFresh->md_id ?? 0);
             }
-
-            $userFresh = $this->SysUsers->get($userId);
-            $mdIdPayment = (int)($userFresh->md_id ?? 0);
 
             // Mirrors save_subscription successful charge block (DataSubscriptionPayments row).
             // Optional params record external/Stripe or office payment references (check, wire ref, etc.).
@@ -2303,7 +2307,12 @@ class SubscriptionController extends AppPluginController {
             if ($is_other_schools || $has_cancelled_subscription || $is_iv_therapy) {
 
                 if(empty($error) && $stripe_result->status == 'succeeded') {
-                    $doctor_id = $this->SysUserAdmin->getAssignedDoctorInjector((int)USER_ID);
+                    $subscriptionIncludesFillers = isset($subs_md['FILLERS']) || isset($subs_msl['FILLERS'])
+                        || in_array('FILLERS', $subs_md_addons, true)
+                        || in_array('FILLERS', $subs_msl_addons, true);
+                    $doctor_id = $subscriptionIncludesFillers
+                        ? $this->SysUserAdmin->getAssignedDoctorForContext((int)USER_ID, ['isFillers' => true])
+                        : $this->SysUserAdmin->getAssignedDoctorInjector((int)USER_ID);
 
                     $c_entity = $this->DataSubscriptionPayments->newEntity([
                         'uid'   => Text::uuid(),
@@ -2849,7 +2858,12 @@ class SubscriptionController extends AppPluginController {
             if ($has_cancelled_subscription || $is_other_schools) {
 
                 if(empty($error) && $stripe_result->status == 'succeeded') {
-                    $doctor_id = $this->SysUserAdmin->getAssignedDoctorInjector((int)USER_ID);
+                    $subscriptionIncludesFillers = isset($subs_md['FILLERS']) || isset($subs_msl['FILLERS'])
+                        || in_array('FILLERS', $subs_md_addons, true)
+                        || in_array('FILLERS', $subs_msl_addons, true);
+                    $doctor_id = $subscriptionIncludesFillers
+                        ? $this->SysUserAdmin->getAssignedDoctorForContext((int)USER_ID, ['isFillers' => true])
+                        : $this->SysUserAdmin->getAssignedDoctorInjector((int)USER_ID);
 
                     $c_entity = $this->DataSubscriptionPayments->newEntity([
                         'uid'   => Text::uuid(),
@@ -3190,7 +3204,12 @@ class SubscriptionController extends AppPluginController {
 
 
 
-            $md_id = $this->SysUserAdmin->getAssignedDoctorInjector((int)USER_ID); 
+            $subscriptionIncludesFillers = isset($subs_md['FILLERS']) || isset($subs_msl['FILLERS'])
+                || in_array('FILLERS', $subs_md_addons, true)
+                || in_array('FILLERS', $subs_msl_addons, true);
+            $md_id = $subscriptionIncludesFillers
+                ? $this->SysUserAdmin->getAssignedDoctorForContext((int)USER_ID, ['isFillers' => true])
+                : $this->SysUserAdmin->getAssignedDoctorInjector((int)USER_ID);
             $c_entity = $this->DataSubscriptionPayments->newEntity([
                 'uid'   => Text::uuid(),
                 'subscription_id'  => $msl_id->id,
@@ -4447,6 +4466,14 @@ class SubscriptionController extends AppPluginController {
                 }
             }
 
+            $this->loadModel('SpaLiveV1.SysUserAdmin');
+            $resolvedMd = (int)($ent_user->md_id ?? 0);
+            if ($this->SysUserAdmin->subscriptionContextIncludesFillers($subscription_type, $main_service, '')) {
+                $resolvedMd = (int)$this->SysUserAdmin->getAssignedDoctorForContext((int)$ent_user->id, ['isFillers' => true]);
+            } elseif (stripos($subscription_type, 'MD') !== false) {
+                $resolvedMd = (int)$this->SysUserAdmin->getAssignedDoctorInjector((int)$ent_user->id);
+            }
+
             if($freeMonth<1){
                 $c_entity = $this->DataSubscriptionPayments->newEntity([
                     'uid'   => Text::uuid(),
@@ -4460,7 +4487,7 @@ class SubscriptionController extends AppPluginController {
                     'error' => $error,
                     'status' => 'DONE',
                     'deleted' => 0,
-                    'md_id' => $ent_user->md_id,
+                    'md_id' => $resolvedMd,
 
                     'payment_type' => 'FULL',
                     'payment_description' => $subscription_type,
@@ -4480,7 +4507,6 @@ class SubscriptionController extends AppPluginController {
 
             if (stripos($subscription_type, 'MD') !== false) {
                 $this->loadModel('SpaLiveV1.SysUserAdmin');
-                $this->SysUserAdmin->getAssignedDoctorInjector((int)$ent_user->id);
 
                 #region Pay comission to sales representative
                 $this->loadModel('SpaLiveV1.DataAssignedToRegister');

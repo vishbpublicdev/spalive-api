@@ -134,17 +134,6 @@ class PaymentsController extends AppPluginController{
         return strtoupper(trim($promoCode));
     }
 
-    private function isFillersSubscriptionContext(string $subscriptionType, string $mainService = '', string $addonsServices = ''): bool
-    {
-        $normalizedType = strtoupper(trim($subscriptionType));
-        if (strpos($normalizedType, 'FILLERS') !== false) {
-            return true;
-        }
-
-        $services = strtoupper(trim($mainService . ',' . $addonsServices));
-        return strpos($services, 'FILLERS') !== false;
-    }
-
     private function isMdSubscriptionType(string $subscriptionType): bool
     {
         return stripos($subscriptionType, 'MD') !== false;
@@ -8508,6 +8497,7 @@ class PaymentsController extends AppPluginController{
         $this->loadModel('SpaLiveV1.DataSubscriptionPayments');
         $this->loadModel('SpaLiveV1.DataSubscriptionsPaymentsError');
         $this->loadModel('SpaLiveV1.SysUsers');
+        $this->loadModel('SpaLiveV1.SysUserAdmin');
 
         \Stripe\Stripe::setApiKey(Configure::read('App.stripe_secret_key'));
         $stripe = new \Stripe\StripeClient(Configure::read('App.stripe_secret_key'));
@@ -8658,13 +8648,12 @@ class PaymentsController extends AppPluginController{
                     'state' => USER_STATE,
                 ]);
 
-                $isFillersSubscription = $this->isFillersSubscriptionContext($subscription_type, (string)$main_service, '');
+                $isFillersSubscription = $this->SysUserAdmin->subscriptionContextIncludesFillers($subscription_type, (string)$main_service, '');
                 if(!$s_entity->hasErrors()) {
 
                     $id = $this->DataSubscriptions->save($s_entity);
                     $ent_user = $this->SysUsers->find()->where(['SysUsers.id' => USER_ID])->first();
 
-                    $this->loadModel('SpaLiveV1.SysUserAdmin');
                     $paymentMdId = (int)($ent_user->md_id ?? 0);
                     if ($isFillersSubscription) {
                         $paymentMdId = $this->SysUserAdmin->getAssignedDoctorForContext((int)USER_ID, ['isFillers' => true]);
