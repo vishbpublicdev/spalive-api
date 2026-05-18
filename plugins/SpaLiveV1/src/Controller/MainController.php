@@ -15671,6 +15671,47 @@ class MainController extends AppPluginController {
 
         $allow_skin_products = $e_user->skin_products == 1? true : false;
 
+        // Otras Escuelas (school_id 332): suscripción MICRONEEDLING no debe abrir catálogo skin/related
+        if ($allow_skin_products && USER_TYPE !== 'clinic') {
+            $this->loadModel('SpaLiveV1.DataCourses');
+            $other_school_microneedling_course = $this->DataCourses->find()
+                ->select(['DataCourses.id'])
+                ->join([
+                    'CatCourses' => [
+                        'table' => 'cat_courses',
+                        'type' => 'INNER',
+                        'conditions' => 'CatCourses.id = DataCourses.course_id',
+                    ],
+                ])
+                ->where([
+                    'DataCourses.user_id' => USER_ID,
+                    'DataCourses.deleted' => 0,
+                    'DataCourses.status' => 'DONE',
+                    'CatCourses.school_id' => 332,
+                    'CatCourses.deleted' => 0,
+                ])
+                ->first();
+
+            if (!empty($other_school_microneedling_course)) {
+                $this->loadModel('SpaLiveV1.DataSubscriptions');
+                $microneedling_subscription = $this->DataSubscriptions->find()
+                    ->where([
+                        'DataSubscriptions.user_id' => USER_ID,
+                        'DataSubscriptions.deleted' => 0,
+                        'DataSubscriptions.status' => 'ACTIVE',
+                        'OR' => [
+                            'DataSubscriptions.main_service LIKE' => '%MICRONEEDLING%',
+                            'DataSubscriptions.addons_services LIKE' => '%MICRONEEDLING%',
+                        ],
+                    ])
+                    ->first();
+
+                if (!empty($microneedling_subscription)) {
+                    $allow_skin_products = false;
+                }
+            }
+        }
+
         // Producto 394: requiere training LEVEL_TWO_DUAL_TOX_AND_DEMALL_FILLER + suscripción a FILLERS y NEUROTOXINS
         $allow_product_394 = ($e_user->level_two_dual == 1 && $e_user->fillers == 1 && $e_user->neurotoxins == 1);
 
@@ -17218,6 +17259,33 @@ class MainController extends AppPluginController {
         //$this->set('q ', $data_questions);
     }
 
+    /**
+     * Qualiphy join URLs can expire before patients join. If true, start_consultation refreshes the invite in place.
+     * Set QUALIPHY_INVITE_MAX_AGE_DAYS=0 to disable (always reuse cached URL when not Zoom).
+     */
+    protected function qualiphyInviteIsStale($consultation): bool
+    {
+        $maxDays = (int) env('QUALIPHY_INVITE_MAX_AGE_DAYS', 7);
+        if ($maxDays <= 0) {
+            return false;
+        }
+        $at = $consultation->qualiphy_invite_at ?? null;
+        if ($at === null || $at === '') {
+            return true;
+        }
+        if ($at instanceof \DateTimeInterface) {
+            $threshold = (new \DateTimeImmutable('now'))->modify("-{$maxDays} days");
+
+            return $at < $threshold;
+        }
+        $ts = strtotime((string) $at);
+        if ($ts === false) {
+            return true;
+        }
+
+        return $ts < (time() - $maxDays * 86400);
+    }
+
     public function start_consultation(){
         $this->loadModel('SpaLiveV1.DataConsultation'); 
         $this->loadModel('SpaLiveV1.DataPayment'); 
@@ -17325,7 +17393,6 @@ class MainController extends AppPluginController {
 
         $consultation_uid = get('consultation_uid','');
         if (empty($consultation_uid)) {
-            $consultation_uid = Text::uuid();
 
             $schedule_by = 0;
             $schedule_date = get('schedule_date','');
@@ -17368,12 +17435,43 @@ class MainController extends AppPluginController {
                 $posicion = strpos($consultation->join_url, 'zoom.us');
 
                 if ($posicion === false){
-                    $this->set('meeting_url', $consultation->join_url);
-                    $this->set('uid', $consultation->uid);
-                    $this->success();
+                    if (!$this->qualiphyInviteIsStale($consultation)) {
+                        $this->set('meeting_url', $consultation->join_url);
+                        $this->set('uid', $consultation->uid);
+                        $this->success();
+                        return;
+                    }
+
+                    $qualiphyRefresh = new QualiphyController();
+                    $rRefresh = $qualiphyRefresh->generate_meeting(
+                        ['consultation_uid' => $consultation->uid, 'user_uid' => USER_UID, 'type' => $string_treatments],
+                        $string_treatments,
+                        $ot_exam_id
+                    );
+                    if (!is_array($rRefresh) || ($rRefresh['http_code'] ?? 0) != 200) {
+                        $this->message($rRefresh['http_code'] ?? 'Qualiphy refresh failed');
+                        if (!empty($rRefresh['error_message'])) {
+                            $this->message($rRefresh['error_message']);
+                        }
+                        return;
+                    }
+                    $inviteNow = date('Y-m-d H:i:s');
+                    $this->DataConsultation->patchEntity($consultation, [
+                        'meeting' => $rRefresh['patient_exams'][0]['patient_exam_id'],
+                        'meeting_pass' => $rRefresh['meeting_uuid'],
+                        'join_url' => $rRefresh['meeting_url'],
+                        'qualiphy_invite_at' => $inviteNow,
+                    ]);
+                    if ($this->DataConsultation->save($consultation)) {
+                        $this->set('meeting_url', $rRefresh['meeting_url']);
+                        $this->set('uid', $consultation->uid);
+                        $this->success();
+                    }
                     return;
                 }
             }
+
+            $consultation_uid = Text::uuid();
 
             $array_save = array(
                 'uid' => $consultation_uid,
@@ -17403,6 +17501,7 @@ class MainController extends AppPluginController {
                 $array_save['meeting'] = $r['patient_exams'][0]['patient_exam_id'];
                 $array_save['meeting_pass'] = $r['meeting_uuid'];
                 $array_save['join_url'] = $r['meeting_url'];
+                $array_save['qualiphy_invite_at'] = date('Y-m-d H:i:s');
 
             } else {
                 $this->message($r['http_code']);
