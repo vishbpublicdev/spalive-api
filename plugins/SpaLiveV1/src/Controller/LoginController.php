@@ -5662,15 +5662,20 @@ class LoginController extends AppPluginController{
             return;
         }
         
+        // Same levels/payment types as CourseController::validateBasicTraining — hybrid counts as basic course equivalent.
+        $hybrid_basic_equivalent_levels = ['MYSPALIVES_HYBRID_TOX_FILLER_COURSE', 'MYSPALIVE_S_HYBRID_TOX_FILLER_COURSE'];
+        $basic_course_payment_types = array_merge(['BASIC COURSE', 'CI REGISTER'], $hybrid_basic_equivalent_levels);
+        $basic_training_levels = array_merge(['LEVEL 1'], $hybrid_basic_equivalent_levels);
+
         $ent_payments_basic = $this->DataPayment->find()->select(['DataPayment.id', 'Refund.id','DataPayment.total','DataPayment.uid','DataPayment.refund_id'])
         ->join([
             'Refund' => ['table' => 'data_payment', 'type' => 'LEFT', 'conditions' => 'Refund.uid = DataPayment.uid AND Refund.type = "REFUND" AND Refund.total = DataPayment.total'],
         ])
-        ->where(['DataPayment.id_from' => USER_ID, 'DataPayment.type IN' => array('BASIC COURSE', 'CI REGISTER'), 'DataPayment.payment <>' => ''])->last();
+        ->where(['DataPayment.id_from' => USER_ID, 'DataPayment.type IN' => $basic_course_payment_types, 'DataPayment.payment <>' => ''])->last();
         
         $user_training = $this->DataTrainings->find()->select(['CatTrainigs.scheduled', 'CatTrainigs.created', 'DataTrainings.attended'])->join([
             'CatTrainigs' => ['table' => 'cat_trainings', 'type' => 'INNER', 'conditions' => 'CatTrainigs.id = DataTrainings.training_id'],
-            ])->where(['CatTrainigs.level' => 'LEVEL 1','DataTrainings.user_id' => USER_ID,'DataTrainings.deleted' => 0])->first();
+            ])->where(['CatTrainigs.level IN' => $basic_training_levels,'DataTrainings.user_id' => USER_ID,'DataTrainings.deleted' => 0])->first();
 
             
         $entCertificate = $this->DataCertificates->find()
@@ -5740,7 +5745,7 @@ class LoginController extends AppPluginController{
                     $this->success();
                     $this->set('step', 'BASICCOURSE');
                     return;
-                }else if ($twice_pay_refund->type == 'BASIC COURSE' && $twice_pay_refund->refund_id  == 0 && empty($user_training)){
+                }else if (in_array($twice_pay_refund->type, $basic_course_payment_types, true) && $twice_pay_refund->refund_id  == 0 && empty($user_training)){
                     $this->success();
                     $this->set('step', 'BASICCOURSE');
                     return;
