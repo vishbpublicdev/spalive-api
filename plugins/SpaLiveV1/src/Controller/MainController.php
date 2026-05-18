@@ -15671,6 +15671,47 @@ class MainController extends AppPluginController {
 
         $allow_skin_products = $e_user->skin_products == 1? true : false;
 
+        // Otras Escuelas (school_id 332): suscripción MICRONEEDLING no debe abrir catálogo skin/related
+        if ($allow_skin_products && USER_TYPE !== 'clinic') {
+            $this->loadModel('SpaLiveV1.DataCourses');
+            $other_school_microneedling_course = $this->DataCourses->find()
+                ->select(['DataCourses.id'])
+                ->join([
+                    'CatCourses' => [
+                        'table' => 'cat_courses',
+                        'type' => 'INNER',
+                        'conditions' => 'CatCourses.id = DataCourses.course_id',
+                    ],
+                ])
+                ->where([
+                    'DataCourses.user_id' => USER_ID,
+                    'DataCourses.deleted' => 0,
+                    'DataCourses.status' => 'DONE',
+                    'CatCourses.school_id' => 332,
+                    'CatCourses.deleted' => 0,
+                ])
+                ->first();
+
+            if (!empty($other_school_microneedling_course)) {
+                $this->loadModel('SpaLiveV1.DataSubscriptions');
+                $microneedling_subscription = $this->DataSubscriptions->find()
+                    ->where([
+                        'DataSubscriptions.user_id' => USER_ID,
+                        'DataSubscriptions.deleted' => 0,
+                        'DataSubscriptions.status' => 'ACTIVE',
+                        'OR' => [
+                            'DataSubscriptions.main_service LIKE' => '%MICRONEEDLING%',
+                            'DataSubscriptions.addons_services LIKE' => '%MICRONEEDLING%',
+                        ],
+                    ])
+                    ->first();
+
+                if (!empty($microneedling_subscription)) {
+                    $allow_skin_products = false;
+                }
+            }
+        }
+
         // Producto 394: requiere training LEVEL_TWO_DUAL_TOX_AND_DEMALL_FILLER + suscripción a FILLERS y NEUROTOXINS
         $allow_product_394 = ($e_user->level_two_dual == 1 && $e_user->fillers == 1 && $e_user->neurotoxins == 1);
 
