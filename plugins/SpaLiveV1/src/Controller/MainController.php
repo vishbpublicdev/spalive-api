@@ -36395,7 +36395,7 @@ class MainController extends AppPluginController {
      *                Examples: 'BASIC COURSE', 'ADVANCED COURSE', 'MYSPALIVE_S_HYBRID_TOX_FILLER_COURSE'
      * - api_key: API key for authentication (required)
      */
-    public function external_payment_confirmation_with_reset_password() {
+    public function external_payment_confirmation() {
         $result = $this->add_external_payment_confirmation();
         if ($result === false) {
             return;
@@ -36464,7 +36464,7 @@ class MainController extends AppPluginController {
         $this->success();
     }
 
-    public function external_payment_confirmation() {
+    public function external_payment_confirmation_cpy() {
         $result = $this->add_external_payment_confirmation();
         if ($result === false) {
             return;
