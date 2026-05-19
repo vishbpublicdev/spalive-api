@@ -23479,7 +23479,46 @@ class MainController extends AppPluginController {
         
         $check_filler = $this->SysUsers->find()->select(['filler_check'])->where(['id' => USER_ID])->first();
 
-        if($check_filler->filler_check == 1){
+        $_fields_filler = ['CatTrainigs.id', 'CatTrainigs.title', 'CatTrainigs.scheduled', 'CatTrainigs.neurotoxins', 'CatTrainigs.fillers', 'CatTrainigs.materials', 'CatTrainigs.available_seats', 'CatTrainigs.level','State.name','State.abv','CatTrainigs.address','CatTrainigs.zip','CatTrainigs.city','data_training_id' => 'DataTrainigs.id', 'attended' => 'DataTrainigs.attended'];
+        $_fields_filler['assistants'] = "(SELECT COUNT(DT.id) from data_trainings DT JOIN sys_users U ON U.id = DT.user_id WHERE DT.training_id = CatTrainigs.id AND DT.deleted = 0 AND U.deleted = 0)";
+        $_fields_filler['enrolled'] = "(SELECT COUNT(id) from data_trainings DT WHERE DT.training_id = CatTrainigs.id AND DT.deleted = 0 AND DT.user_id = " . USER_ID . " )";
+        $_join_filler = [
+            'DataTrainigs' => ['table' => 'data_trainings', 'type' => 'INNER', 'conditions' => 'CatTrainigs.id = DataTrainigs.training_id'],
+            'State' => ['table' => 'cat_states', 'type' => 'INNER', 'conditions' => 'State.id = CatTrainigs.state_id']
+        ];
+        $_where_filler_done = ['DataTrainigs.user_id' => USER_ID, 'DataTrainigs.deleted' => 0, 'CatTrainigs.deleted' => 0,'(DATE_FORMAT(CatTrainigs.scheduled, "%Y-%m-%d 09:00:00") < "' . $now . '")', 'CatTrainigs.level IN' => $filler_equivalent_levels];
+
+        $filler_done_trainings = $this->CatTrainigs->find()->select($_fields_filler)
+            ->join($_join_filler)
+            ->where($_where_filler_done)->order(['CatTrainigs.scheduled' => 'ASC'])->toArray();
+
+        if (!empty($filler_done_trainings)) {
+            $show_buy_button_level_3_fillers = false;
+
+            foreach ($filler_done_trainings as $row) {
+                $seats = $row['available_seats'] - $row['assistants'];
+
+                $address = $row->address.', '.$row->city.', '.$row->State['abv'].' '.$row->zip;
+                $status = 'DONE';
+                if (in_array($row['level'], $hybrid_basic_equivalent_levels, true)) {
+                    if ($row['scheduled'] > $c_date) {
+                        $status = $row['attended'] == 1 ? 'DONE' : 'VERIFY_ASSISTANCE';
+                    }
+                } elseif ($row['scheduled'] > $c_date) {
+                    $status = $row['attended'] == 1 ? 'DONE' : 'VERIFY_ASSISTANCE';
+                }
+                $tr_result[] = array(
+                    'id'            => $row['id'],
+                    'title'         => $row['title'],
+                    'scheduled'   => $row['scheduled']->i18nFormat('MM-dd-Y hh:mm a'),
+                    'available_seats' => $seats,
+                    'status' => $status,
+                    'address' => $address,
+                    'level' => $row['level'],
+                    'data_training_id' => $row['data_training_id'],
+                );
+            }
+        } elseif ($check_filler->filler_check == 1) {
 
             $purchased = false;
 
@@ -23488,45 +23527,7 @@ class MainController extends AppPluginController {
                 ->where(['DataPayment.id_from' => $user["user_id"], 'DataPayment.id_to' => 0,'DataPayment.type IN' => $filler_course_payment_types,
                     'DataPayment.service_uid' => '','DataPayment.payment <>' => '', 'DataPayment.is_visible' => 1])->first();
 
-            $_fields_filler = ['CatTrainigs.id', 'CatTrainigs.title', 'CatTrainigs.scheduled', 'CatTrainigs.neurotoxins', 'CatTrainigs.fillers', 'CatTrainigs.materials', 'CatTrainigs.available_seats', 'CatTrainigs.level','State.name','State.abv','CatTrainigs.address','CatTrainigs.zip','CatTrainigs.city','data_training_id' => 'DataTrainigs.id', 'attended' => 'DataTrainigs.attended'];
-            $_fields_filler['assistants'] = "(SELECT COUNT(DT.id) from data_trainings DT JOIN sys_users U ON U.id = DT.user_id WHERE DT.training_id = CatTrainigs.id AND DT.deleted = 0 AND U.deleted = 0)";
-            $_fields_filler['enrolled'] = "(SELECT COUNT(id) from data_trainings DT WHERE DT.training_id = CatTrainigs.id AND DT.deleted = 0 AND DT.user_id = " . USER_ID . " )";
-            $_join_filler = [
-                'DataTrainigs' => ['table' => 'data_trainings', 'type' => 'INNER', 'conditions' => 'CatTrainigs.id = DataTrainigs.training_id'],
-                'State' => ['table' => 'cat_states', 'type' => 'INNER', 'conditions' => 'State.id = CatTrainigs.state_id']
-            ];
-            $_where_filler_done = ['DataTrainigs.user_id' => USER_ID, 'DataTrainigs.deleted' => 0, 'CatTrainigs.deleted' => 0,'(DATE_FORMAT(CatTrainigs.scheduled, "%Y-%m-%d 09:00:00") < "' . $now . '")', 'CatTrainigs.level IN' => $filler_equivalent_levels];
-
-            $filler_done_trainings = $this->CatTrainigs->find()->select($_fields_filler)
-                ->join($_join_filler)
-                ->where($_where_filler_done)->order(['CatTrainigs.scheduled' => 'ASC'])->toArray();
-
-            if (!empty($filler_done_trainings)) {
-                $show_buy_button_level_3_fillers = false;
-                $tr_result = array();
-
-                foreach ($filler_done_trainings as $row) {
-                    $seats = $row['available_seats'] - $row['assistants'];
-
-                    $address = $row->address.', '.$row->city.', '.$row->State['abv'].' '.$row->zip;
-                    $status = 'DONE';
-                    if($row['scheduled'] > $c_date){
-                        $status = $row['attended'] == 1
-                            ? 'DONE'
-                            : 'VERIFY_ASSISTANCE';
-                    }
-                    $tr_result[] = array(
-                        'id'            => $row['id'],
-                        'title'         => $row['title'],
-                        'scheduled'   => $row['scheduled']->i18nFormat('MM-dd-Y hh:mm a'),
-                        'available_seats' => $seats,
-                        'status' => $status,
-                        'address' => $address,
-                        'level' => $row['level'],
-                        'data_training_id' => $row['data_training_id'],
-                    );
-                }
-            } else if(!empty($payment)){
+            if(!empty($payment)){
                 $purchased =  true;
                 $show_buy_button_level_3_fillers = false;
 
@@ -23625,7 +23626,7 @@ class MainController extends AppPluginController {
                 }
             }
         
-        } else{
+        } else {
             $show_buy_button_level_3_fillers = true;
             $tr_result[] = array(
                 'id'            => 0,
