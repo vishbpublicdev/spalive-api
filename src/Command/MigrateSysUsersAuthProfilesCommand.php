@@ -13,6 +13,10 @@ use Throwable;
 /**
  * Phase A: sys_users -> auth.users (via Admin API) + auth.identities + public.user_profiles (+ public.patients)
  * Also maintains public.migration_sys_users_map and a DB checkpoint for resumable runs.
+ *
+ * --config selects DB credentials only. For LIVE, pass explicitly in cron/CLI, e.g.:
+ *   --config config/migration_sys_users_LIVE.php
+ *   --log-file logs/migration_sys_users_auth_profiles_live.jsonl
  */
 class MigrateSysUsersAuthProfilesCommand extends Command
 {
@@ -96,10 +100,9 @@ class MigrateSysUsersAuthProfilesCommand extends Command
             return static::CODE_ERROR;
         }
 
-        if (!$dryRun) {
-            $this->ensureCheckpointTable($target);
-            $this->ensureMapTable($target);
-        }
+        // CREATE IF NOT EXISTS only — needed in dry-run too on a fresh LIVE DB (dev already had these from earlier runs).
+        $this->ensureCheckpointTable($target);
+        $this->ensureMapTable($target);
 
         $lastId = $fromId > 0 ? $fromId : 0;
         // Resume cursor must apply in dry-run too; otherwise scans always start from 0 and look "wrong".
@@ -191,7 +194,7 @@ class MigrateSysUsersAuthProfilesCommand extends Command
                     $fullName = $this->buildFullName($row['name'] ?? null, $row['mname'] ?? null, $row['lname'] ?? null);
                     $appRole = $this->mapRole((string)$row['type']);
                     $onboarding = $this->mapOnboardingStatus((string)($row['steps'] ?? ''));
-                    $isProviderLike = in_array($appRole, ['provider', 'medical_director', 'staff'], true);
+                    $isProviderLike = in_array($appRole, ['provider', 'school', 'medical_director', 'staff'], true);
                     $isActive = ((int)$row['active'] === 1);
                     $bannedUntil = $isActive ? null : gmdate('Y-m-d H:i:sP');
                     $pushEnabled = ((int)$row['enable_notifications'] === 1);
@@ -572,7 +575,10 @@ class MigrateSysUsersAuthProfilesCommand extends Command
         if (in_array($legacyType, ['patient', 'patient_mint'], true)) {
             return 'patient';
         }
-        if (in_array($legacyType, ['injector', 'gfe+ci', 'mint_injector', 'branch_injector', 'clinic', 'school'], true)) {
+        if ($legacyType === 'school') {
+            return 'school';
+        }
+        if (in_array($legacyType, ['injector', 'gfe+ci', 'mint_injector', 'branch_injector', 'clinic'], true)) {
             return 'provider';
         }
         if ($legacyType === 'examiner') {
