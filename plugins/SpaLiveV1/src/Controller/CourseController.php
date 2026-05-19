@@ -229,7 +229,8 @@ class CourseController extends AppPluginController {
         // valida stock de fillers y prerrequisitos (level 1 + level 2 completados)
         $fillers = $this->CatProducts->find()->where(['CatProducts.id' => 178, 'CatProducts.deleted' => 0, 'CatProducts.stock' => 1])->first();
         $hasBasicAndAdvancedCourse = CourseController::validateBasicAndAdvancedTraining($this);
-        if(!empty($fillers) && $hasBasicAndAdvancedCourse){
+        $hasFillerEquivalentTraining = CourseController::userHasFillerEquivalentTraining($this, (int)USER_ID);
+        if(!empty($fillers) && $hasBasicAndAdvancedCourse && !$hasFillerEquivalentTraining){
             $data_trainings[] = [
                 'training_id' => 0,
                 'treatment_id' => 0,
@@ -289,27 +290,83 @@ class CourseController extends AppPluginController {
     }
 
     /**
+     * In-person training counts as completed when scheduled is in the past and either
+     * attended=1 (classes after 2023-02-27) or the class date is before that cutoff.
+     * Same rules as MainController::get_trainings done-training blocks.
+     */
+    public static function userHasCompletedTrainingLevels($ref, int $userId, array $levels): bool {
+        if ($userId <= 0 || empty($levels)) {
+            return false;
+        }
+
+        $ref->loadModel('SpaLiveV1.DataTrainings');
+        $now = date('Y-m-d H:i:s');
+        $cutoff = new \DateTime('2023-02-27 00:00:00');
+
+        $rows = $ref->DataTrainings->find()
+            ->select(['DataTrainings.attended', 'Cat.scheduled'])
+            ->join([
+                'Cat' => [
+                    'table' => 'cat_trainings',
+                    'type' => 'INNER',
+                    'conditions' => 'Cat.id = DataTrainings.training_id',
+                ],
+            ])
+            ->where([
+                'DataTrainings.user_id' => $userId,
+                'DataTrainings.deleted' => 0,
+                'Cat.deleted' => 0,
+                'Cat.level IN' => $levels,
+                '(DATE_FORMAT(Cat.scheduled, "%Y-%m-%d 09:00:00") < "' . $now . '")',
+            ])
+            ->all();
+
+        foreach ($rows as $row) {
+            $scheduled = $row['Cat']['scheduled'] ?? null;
+            if ($scheduled === null) {
+                continue;
+            }
+            if ($scheduled <= $cutoff) {
+                return true;
+            }
+            if ((int)$row->attended === 1) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * User already completed fillers via hybrid, dual, or dedicated filler trainings.
+     */
+    public static function userHasFillerEquivalentTraining($ref, int $userId): bool {
+        $fillerLevels = [
+            'LEVEL 3 FILLERS',
+            'FILLER_COURSE_LEVEL_1',
+            'MYSPALIVES_HYBRID_TOX_FILLER_COURSE',
+            'MYSPALIVE_S_HYBRID_TOX_FILLER_COURSE',
+            'LEVEL_TWO_DUAL_TOX_AND_DEMALL_FILLER',
+        ];
+
+        return self::userHasCompletedTrainingLevels($ref, $userId, $fillerLevels);
+    }
+
+    /**
      * @see validateBasicAndAdvancedTraining Uses USER_ID from validated session.
      */
     public static function validateBasicAndAdvancedTrainingForUser($ref, int $userId): bool {
         if ($userId <= 0) {
             return false;
         }
-        $ref->loadModel('SpaLiveV1.DataTrainings');
+
+        $hybridLevels = ['MYSPALIVES_HYBRID_TOX_FILLER_COURSE', 'MYSPALIVE_S_HYBRID_TOX_FILLER_COURSE'];
+        $basicLevels = array_merge(['LEVEL 1'], $hybridLevels);
+        $advancedLevels = ['LEVEL 2', 'LEVEL_TWO_DUAL_TOX_AND_DEMALL_FILLER'];
+
         $ref->loadModel('SpaLiveV1.DataCourses');
 
-        $level1 = $ref->DataTrainings->find()
-            ->join(['Cat' => ['table' => 'cat_trainings', 'type' => 'INNER', 'conditions' => 'Cat.id = DataTrainings.training_id']])
-            ->where([
-                'DataTrainings.user_id' => $userId,
-                'DataTrainings.deleted' => 0,
-                'DataTrainings.attended' => 1,
-                'Cat.level IN' => array('LEVEL 1','MYSPALIVE_S_HYBRID_TOX_FILLER_COURSE','MYSPALIVES_HYBRID_TOX_FILLER_COURSE'),
-                'Cat.deleted' => 0
-            ])
-            ->first();
-
-        $hasBasic = !empty($level1);
+        $hasBasic = self::userHasCompletedTrainingLevels($ref, $userId, $basicLevels);
         if (!$hasBasic) {
             $user_course_basic = $ref->DataCourses->find()->select(['CatCourses.type'])->join([
                 'CatCourses' => ['table' => 'cat_courses', 'type' => 'INNER', 'conditions' => 'CatCourses.id = DataCourses.course_id'],
@@ -322,18 +379,7 @@ class CourseController extends AppPluginController {
             $hasBasic = !empty($user_course_basic);
         }
 
-        $level2 = $ref->DataTrainings->find()
-            ->join(['Cat' => ['table' => 'cat_trainings', 'type' => 'INNER', 'conditions' => 'Cat.id = DataTrainings.training_id']])
-            ->where([
-                'DataTrainings.user_id' => $userId,
-                'DataTrainings.deleted' => 0,
-                'DataTrainings.attended' => 1,
-                'Cat.level' => 'LEVEL 2',
-                'Cat.deleted' => 0
-            ])
-            ->first();
-
-        $hasAdvanced = !empty($level2);
+        $hasAdvanced = self::userHasCompletedTrainingLevels($ref, $userId, $advancedLevels);
         if (!$hasAdvanced) {
             $user_course_advanced = $ref->DataCourses->find()->select(['CatCourses.type'])->join([
                 'CatCourses' => ['table' => 'cat_courses', 'type' => 'INNER', 'conditions' => 'CatCourses.id = DataCourses.course_id'],

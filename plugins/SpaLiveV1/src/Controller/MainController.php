@@ -15575,6 +15575,37 @@ class MainController extends AppPluginController {
 
     }
 
+    /**
+     * inventory_grid items must expose shop_button as JSON booleans (not 0/1).
+     */
+    private function normalizeInventoryShopItems(array $items): array
+    {
+        foreach ($items as &$item) {
+            if (!is_array($item) || !array_key_exists('shop_button', $item)) {
+                continue;
+            }
+            $shopButton = $item['shop_button'];
+            $item['shop_button'] = $shopButton === true
+                || $shopButton === 1
+                || $shopButton === '1';
+        }
+        unset($item);
+
+        return $items;
+    }
+
+    private function normalizeInventoryShopCategoryMap(array $categoryMap): array
+    {
+        foreach ($categoryMap as &$items) {
+            if (is_array($items)) {
+                $items = $this->normalizeInventoryShopItems($items);
+            }
+        }
+        unset($items);
+
+        return $categoryMap;
+    }
+
     public function inventory_grid() {
 
         $token = get('token',"");
@@ -16244,12 +16275,15 @@ class MainController extends AppPluginController {
                 );
         }
 
-
+        $other = $this->normalizeInventoryShopItems($other);
+        $arr_iv = $this->normalizeInventoryShopItems($arr_iv);
+        $arr_prod = $this->normalizeInventoryShopCategoryMap($arr_prod);
 
         $this->set('other', $other);
         sort($arr_iv);
         $this->set('arr_iv', $arr_iv);
-        $data_order = array_merge($arr_iv,$other);
+        $data_order = array_merge($arr_iv, $other);
+        $data_order = $this->normalizeInventoryShopItems($data_order);
         $this->set('data', $data_order);
         $this->set('data_order', array_reverse($arr_prod));
         $this->set('total_prod', sizeof($res_arr));
@@ -16310,7 +16344,7 @@ class MainController extends AppPluginController {
                         'delivery_company' => empty($row['delivery_company']) ? "" : $row['delivery_company'],
                         'tracking_two' => empty($row['tracking2']) ? "" : $row['tracking2'],
                         'delivery_company_two' => empty($row['delivery_company2']) ? "" : $row['delivery_company2'],
-                        'shipping_date' => empty($row['shipping_date']) ? "" : $row['shipping_date'],
+                        'shipping_date' => empty($row['shipping_date']) ? $row['created'] : $row['shipping_date'],
                         'created' => $row['created'],
                         'show_signature' => $row['status'] == 'READY FOR PICKUP' && $row['is_pickup'], 
                         'signature' => empty($row['signature']) ? 0 : $row['signature'],
@@ -16321,7 +16355,7 @@ class MainController extends AppPluginController {
                     );
 
                     $this->loadModel('SpaLiveV1.DataPurchasesDetail');
-                    $ent_purchases = $this->DataPurchasesDetail->find()->select(['DataPurchasesDetail.price', 'DataPurchasesDetail.qty','Product.name','Product.category', 'DataPurchasesDetail.product_id'])
+                    $purchase_details = $this->DataPurchasesDetail->find()->select(['DataPurchasesDetail.price', 'DataPurchasesDetail.qty','Product.name','Product.category', 'DataPurchasesDetail.product_id'])
                     ->join([
                         'Product' => ['table' => 'cat_products', 'type' => 'INNER', 'conditions' => 'Product.id = DataPurchasesDetail.product_id']
                     ])->where(['DataPurchasesDetail.purchase_id' => $row['id']])->limit(100)->order(['DataPurchasesDetail.id' => 'DESC'])->all();
@@ -16329,9 +16363,9 @@ class MainController extends AppPluginController {
                     $detail_array = array();
                     $grand_total = 0;
 
-                    if(!empty($ent_purchases)){
+                    if(!empty($purchase_details)){
                             
-                        foreach ($ent_purchases as $_row) {
+                        foreach ($purchase_details as $_row) {
                             if($_row['product_id'] == 44){
                                 $add_result['status'] = '';
                                 $add_result['tracking'] = '';
@@ -23020,8 +23054,13 @@ class MainController extends AppPluginController {
 
         $tr_result = array();
 
-        // Same levels as CourseController::validateBasicTraining — hybrid counts as prerequisite for Level 2 / Advanced.
+        // Same levels as CourseController::validateBasicTraining / SummaryController course keys.
         $hybrid_basic_equivalent_levels = ['MYSPALIVES_HYBRID_TOX_FILLER_COURSE', 'MYSPALIVE_S_HYBRID_TOX_FILLER_COURSE'];
+        $basic_course_payment_types = array_merge(['BASIC COURSE'], $hybrid_basic_equivalent_levels);
+        $advanced_equivalent_levels = ['LEVEL 2', 'LEVEL_TWO_DUAL_TOX_AND_DEMALL_FILLER'];
+        $advanced_course_payment_types = ['ADVANCED COURSE', 'LEVEL_TWO_DUAL_TOX_AND_DEMALL_FILLER'];
+        $filler_equivalent_levels = ['LEVEL 3 FILLERS', 'FILLER_COURSE_LEVEL_1', 'MYSPALIVES_HYBRID_TOX_FILLER_COURSE', 'MYSPALIVE_S_HYBRID_TOX_FILLER_COURSE', 'LEVEL_TWO_DUAL_TOX_AND_DEMALL_FILLER'];
+        $filler_course_payment_types = array_merge(['FILLERS COURSE', 'LEVEL_TWO_DUAL_TOX_AND_DEMALL_FILLER', 'FILLER_COURSE_LEVEL_1'], $hybrid_basic_equivalent_levels);
 
         $_fields = ['CatTrainigs.id', 'CatTrainigs.title', 'CatTrainigs.scheduled', 'CatTrainigs.neurotoxins', 'CatTrainigs.fillers', 'CatTrainigs.materials', 'CatTrainigs.available_seats', 'CatTrainigs.level','State.name','State.abv','CatTrainigs.address','CatTrainigs.zip','CatTrainigs.city', 'data_training_id' => 'DataTrainigs.id', 'attended' => 'DataTrainigs.attended'];
         $_fields['assistants'] = "(SELECT COUNT(id) from data_trainings DT WHERE DT.training_id = CatTrainigs.id AND DT.deleted = 0)";
@@ -23048,13 +23087,17 @@ class MainController extends AppPluginController {
 
         $c_date = new \DateTime('2023-02-27 00:00:00');
         //$this->set('c_date', $c_date);
-        foreach ($done_trainings as $row) {
+        foreach (array_merge($done_trainings, $done_hybrid_basic_equivalent) as $row) {
             $seats = $row['available_seats'] - $row['assistants'];
 
             $address = $row->address.', '.$row->city.', '.$row->State['abv'].' '.$row->zip;
             $c_date = new \DateTime('2023-02-27 00:00:00');
             $status = 'DONE';
-            if($row['scheduled'] > $c_date){
+            if (in_array($row['level'], $hybrid_basic_equivalent_levels, true)) {
+                if ($row['scheduled'] > $c_date) {
+                    $status = $row['attended'] == 1 ? 'DONE' : 'VERIFY_ASSISTANCE';
+                }
+            } elseif ($row['scheduled'] > $c_date) {
 
                 $Course = new CourseController();
                 $basic_training_status = $Course->consult_neurotoxin_application($row,$user["user_id"]);
@@ -23091,7 +23134,7 @@ class MainController extends AppPluginController {
 
             $this->loadModel('SpaLiveV1.DataPayment');
             $payment = $this->DataPayment->find()
-                ->where(['DataPayment.id_from' => $user["user_id"], 'DataPayment.id_to' => 0,'DataPayment.type' => "BASIC COURSE", 
+                ->where(['DataPayment.id_from' => $user["user_id"], 'DataPayment.id_to' => 0,'DataPayment.type IN' => $basic_course_payment_types,
                     'DataPayment.service_uid' => '','DataPayment.payment <>' => '', 'DataPayment.is_visible' => 1])->first();
             
             if(!empty($payment)){
@@ -23108,7 +23151,8 @@ class MainController extends AppPluginController {
                 'DataTrainigs' => ['table' => 'data_trainings', 'type' => 'INNER', 'conditions' => 'CatTrainigs.id = DataTrainigs.training_id'],
                 'State' => ['table' => 'cat_states', 'type' => 'INNER', 'conditions' => 'State.id = CatTrainigs.state_id']
             ];
-            $_where = ['DataTrainigs.user_id' => USER_ID, 'DataTrainigs.deleted' => 0, 'CatTrainigs.deleted' => 0,'(DATE_FORMAT(CatTrainigs.scheduled, "%Y-%m-%d 09:00:00") > "' . $now . '")', 'CatTrainigs.level' => 'LEVEL 1'];
+            $basic_enrolled_levels = array_merge(['LEVEL 1'], $hybrid_basic_equivalent_levels);
+            $_where = ['DataTrainigs.user_id' => USER_ID, 'DataTrainigs.deleted' => 0, 'CatTrainigs.deleted' => 0,'(DATE_FORMAT(CatTrainigs.scheduled, "%Y-%m-%d 09:00:00") > "' . $now . '")', 'CatTrainigs.level IN' => $basic_enrolled_levels];
 
             $enrolled_trainings  = $this->CatTrainigs->find()->select($_fields)
             ->join($_join)
@@ -23289,7 +23333,7 @@ class MainController extends AppPluginController {
                 'State' => ['table' => 'cat_states', 'type' => 'INNER', 'conditions' => 'State.id = CatTrainigs.state_id']
             ];
         
-        $_where = ['DataTrainigs.user_id' => USER_ID, 'DataTrainigs.deleted' => 0, 'CatTrainigs.deleted' => 0,'(DATE_FORMAT(CatTrainigs.scheduled, "%Y-%m-%d 09:00:00") < "' . $now . '")', 'CatTrainigs.level' => 'LEVEL 2'];
+        $_where = ['DataTrainigs.user_id' => USER_ID, 'DataTrainigs.deleted' => 0, 'CatTrainigs.deleted' => 0,'(DATE_FORMAT(CatTrainigs.scheduled, "%Y-%m-%d 09:00:00") < "' . $now . '")', 'CatTrainigs.level IN' => $advanced_equivalent_levels];
 
         $done_trainings = $this->CatTrainigs->find()->select($_fields)
         ->join($_join)
@@ -23325,7 +23369,7 @@ class MainController extends AppPluginController {
 
             $this->loadModel('SpaLiveV1.DataPayment');
             $payment = $this->DataPayment->find()
-                ->where(['DataPayment.id_from' => $user["user_id"], 'DataPayment.id_to' => 0,'DataPayment.type' => "ADVANCED COURSE", 
+                ->where(['DataPayment.id_from' => $user["user_id"], 'DataPayment.id_to' => 0,'DataPayment.type IN' => $advanced_course_payment_types,
                     'DataPayment.service_uid' => '','DataPayment.payment <>' => '', 'DataPayment.is_visible' => 1,'DataPayment.refund_id' => 0])->first();
             
             if(!empty($payment)){
@@ -23340,7 +23384,7 @@ class MainController extends AppPluginController {
                 'DataTrainigs' => ['table' => 'data_trainings', 'type' => 'INNER', 'conditions' => 'CatTrainigs.id = DataTrainigs.training_id'],
                 'State' => ['table' => 'cat_states', 'type' => 'INNER', 'conditions' => 'State.id = CatTrainigs.state_id']
             ];
-            $_where = ['DataTrainigs.user_id' => USER_ID, 'DataTrainigs.deleted' => 0, 'CatTrainigs.deleted' => 0,'(DATE_FORMAT(CatTrainigs.scheduled, "%Y-%m-%d 09:00:00") > "' . $now . '")', 'CatTrainigs.level' => 'LEVEL 2'];
+            $_where = ['DataTrainigs.user_id' => USER_ID, 'DataTrainigs.deleted' => 0, 'CatTrainigs.deleted' => 0,'(DATE_FORMAT(CatTrainigs.scheduled, "%Y-%m-%d 09:00:00") > "' . $now . '")', 'CatTrainigs.level IN' => $advanced_equivalent_levels];
 
             
             $enrolled_trainings  = $this->CatTrainigs->find()->select($_fields)
@@ -23372,7 +23416,7 @@ class MainController extends AppPluginController {
                     $_join = [
                         'State' => ['table' => 'cat_states', 'type' => 'INNER', 'conditions' => 'State.id = CatTrainigs.state_id']
                     ];
-                    $_where = ['CatTrainigs.deleted' => 0, 'CatTrainigs.deleted' => 0, 'CatTrainigs.level' => 'LEVEL 2'];
+                    $_where = ['CatTrainigs.deleted' => 0, 'CatTrainigs.deleted' => 0, 'CatTrainigs.level IN' => $advanced_equivalent_levels];
 
                     if(!empty($training_level_one)){
                         $_where['CatTrainigs.scheduled >'] = $training_level_one['CatTrainigs']['scheduled'];
@@ -23441,30 +23485,27 @@ class MainController extends AppPluginController {
 
             $this->loadModel('SpaLiveV1.DataPayment');
             $payment = $this->DataPayment->find()
-                ->where(['DataPayment.id_from' => $user["user_id"], 'DataPayment.id_to' => 0,'DataPayment.type' => "FILLERS COURSE", 
+                ->where(['DataPayment.id_from' => $user["user_id"], 'DataPayment.id_to' => 0,'DataPayment.type IN' => $filler_course_payment_types,
                     'DataPayment.service_uid' => '','DataPayment.payment <>' => '', 'DataPayment.is_visible' => 1])->first();
-            
-            if(!empty($payment)){
-                $purchased =  true;
-                $show_buy_button_level_3_fillers = false;
 
+            $_fields_filler = ['CatTrainigs.id', 'CatTrainigs.title', 'CatTrainigs.scheduled', 'CatTrainigs.neurotoxins', 'CatTrainigs.fillers', 'CatTrainigs.materials', 'CatTrainigs.available_seats', 'CatTrainigs.level','State.name','State.abv','CatTrainigs.address','CatTrainigs.zip','CatTrainigs.city','data_training_id' => 'DataTrainigs.id', 'attended' => 'DataTrainigs.attended'];
+            $_fields_filler['assistants'] = "(SELECT COUNT(DT.id) from data_trainings DT JOIN sys_users U ON U.id = DT.user_id WHERE DT.training_id = CatTrainigs.id AND DT.deleted = 0 AND U.deleted = 0)";
+            $_fields_filler['enrolled'] = "(SELECT COUNT(id) from data_trainings DT WHERE DT.training_id = CatTrainigs.id AND DT.deleted = 0 AND DT.user_id = " . USER_ID . " )";
+            $_join_filler = [
+                'DataTrainigs' => ['table' => 'data_trainings', 'type' => 'INNER', 'conditions' => 'CatTrainigs.id = DataTrainigs.training_id'],
+                'State' => ['table' => 'cat_states', 'type' => 'INNER', 'conditions' => 'State.id = CatTrainigs.state_id']
+            ];
+            $_where_filler_done = ['DataTrainigs.user_id' => USER_ID, 'DataTrainigs.deleted' => 0, 'CatTrainigs.deleted' => 0,'(DATE_FORMAT(CatTrainigs.scheduled, "%Y-%m-%d 09:00:00") < "' . $now . '")', 'CatTrainigs.level IN' => $filler_equivalent_levels];
+
+            $filler_done_trainings = $this->CatTrainigs->find()->select($_fields_filler)
+                ->join($_join_filler)
+                ->where($_where_filler_done)->order(['CatTrainigs.scheduled' => 'ASC'])->toArray();
+
+            if (!empty($filler_done_trainings)) {
+                $show_buy_button_level_3_fillers = false;
                 $tr_result = array();
 
-                $_fields = ['CatTrainigs.id', 'CatTrainigs.title', 'CatTrainigs.scheduled', 'CatTrainigs.neurotoxins', 'CatTrainigs.fillers', 'CatTrainigs.materials', 'CatTrainigs.available_seats', 'CatTrainigs.level','State.name','State.abv','CatTrainigs.address','CatTrainigs.zip','CatTrainigs.city','data_training_id' => 'DataTrainigs.id', 'attended' => 'DataTrainigs.attended'];
-                $fields['assistants'] = "(SELECT COUNT(DT.id) from data_trainings DT JOIN sys_users U ON U.id = DT.user_id WHERE DT.training_id = CatTrainigs.id AND DT.deleted = 0 AND U.deleted = 0)";
-                $_fields['enrolled'] = "(SELECT COUNT(id) from data_trainings DT WHERE DT.training_id = CatTrainigs.id AND DT.deleted = 0 AND DT.user_id = " . USER_ID . " )";
-                $_join = [
-                        'DataTrainigs' => ['table' => 'data_trainings', 'type' => 'INNER', 'conditions' => 'CatTrainigs.id = DataTrainigs.training_id'],
-                        'State' => ['table' => 'cat_states', 'type' => 'INNER', 'conditions' => 'State.id = CatTrainigs.state_id']
-                    ];
-                
-                $_where = ['DataTrainigs.user_id' => USER_ID, 'DataTrainigs.deleted' => 0, 'CatTrainigs.deleted' => 0,'(DATE_FORMAT(CatTrainigs.scheduled, "%Y-%m-%d 09:00:00") < "' . $now . '")', 'CatTrainigs.level IN' => ['LEVEL 3 FILLERS','FILLER_COURSE_LEVEL_1']];
-
-                $done_trainings = $this->CatTrainigs->find()->select($_fields)
-                ->join($_join)
-                ->where($_where)->order(['CatTrainigs.scheduled' => 'ASC'])->toArray();
-
-                foreach ($done_trainings as $row) {
+                foreach ($filler_done_trainings as $row) {
                     $seats = $row['available_seats'] - $row['assistants'];
 
                     $address = $row->address.', '.$row->city.', '.$row->State['abv'].' '.$row->zip;
@@ -23485,75 +23526,75 @@ class MainController extends AppPluginController {
                         'data_training_id' => $row['data_training_id'],
                     );
                 }
+            } else if(!empty($payment)){
+                $purchased =  true;
+                $show_buy_button_level_3_fillers = false;
 
-                if (empty($done_trainings)) {
+                $tr_result = array();
 
-                    // FIND ENROLLED TRAINING
+                // FIND ENROLLED TRAINING
 
-                    $_fields = ['CatTrainigs.id', 'CatTrainigs.title', 'CatTrainigs.scheduled', 'CatTrainigs.neurotoxins', 'CatTrainigs.fillers', 'CatTrainigs.materials', 'CatTrainigs.available_seats', 'CatTrainigs.level','State.name','State.abv','CatTrainigs.address','CatTrainigs.zip','CatTrainigs.city','data_training_id' => 'DataTrainigs.id'];
-                    $_fields['assistants'] = "(SELECT COUNT(id) from data_trainings DT WHERE DT.training_id = CatTrainigs.id AND DT.deleted = 0)";
-                    $_fields['enrolled'] = "(SELECT COUNT(id) from data_trainings DT WHERE DT.training_id = CatTrainigs.id AND DT.deleted = 0 AND DT.user_id = " . USER_ID . " )";
+                $_fields = ['CatTrainigs.id', 'CatTrainigs.title', 'CatTrainigs.scheduled', 'CatTrainigs.neurotoxins', 'CatTrainigs.fillers', 'CatTrainigs.materials', 'CatTrainigs.available_seats', 'CatTrainigs.level','State.name','State.abv','CatTrainigs.address','CatTrainigs.zip','CatTrainigs.city','data_training_id' => 'DataTrainigs.id'];
+                $_fields['assistants'] = "(SELECT COUNT(id) from data_trainings DT WHERE DT.training_id = CatTrainigs.id AND DT.deleted = 0)";
+                $_fields['enrolled'] = "(SELECT COUNT(id) from data_trainings DT WHERE DT.training_id = CatTrainigs.id AND DT.deleted = 0 AND DT.user_id = " . USER_ID . " )";
+                $_join = [
+                    'DataTrainigs' => ['table' => 'data_trainings', 'type' => 'INNER', 'conditions' => 'CatTrainigs.id = DataTrainigs.training_id'],
+                    'State' => ['table' => 'cat_states', 'type' => 'INNER', 'conditions' => 'State.id = CatTrainigs.state_id']
+                ];
+                $_where = ['DataTrainigs.user_id' => USER_ID, 'DataTrainigs.deleted' => 0, 'CatTrainigs.deleted' => 0,'(DATE_FORMAT(CatTrainigs.scheduled, "%Y-%m-%d 09:00:00") > "' . $now . '")', 'CatTrainigs.level IN' => $filler_equivalent_levels];
+
+                $enrolled_trainings  = $this->CatTrainigs->find()->select($_fields)
+                ->join($_join)
+                ->where($_where)->first();
+
+                if (!empty($enrolled_trainings)) {
+
+                    $seats = $enrolled_trainings['available_seats'] - $enrolled_trainings['assistants'];
+                    if($seats <= 0) $seats = 0;
+
+                    $address = $enrolled_trainings->address.', '.$enrolled_trainings->city.', '.$enrolled_trainings->State['abv'].' '.$enrolled_trainings->zip;
+                    $tr_result[] = array(
+                        'id'            => $enrolled_trainings['id'],
+                        'title'         => $enrolled_trainings['title'],
+                        'scheduled'   => $enrolled_trainings['scheduled']->i18nFormat('MM-dd-Y hh:mm a'),
+                        'available_seats' => $seats,
+                        'status' => 'ENROLLED',
+                        'address' => $address,
+                        'level' => 'Fillers Course Level 1',
+                    );
+
+                } else {
+
+                    // CHECK IF HAVE TRAINING PURCHASE
+
+                    if ($purchased) {
+                    $fields = ['CatTrainigs.id', 'CatTrainigs.title', 'CatTrainigs.scheduled', 'CatTrainigs.neurotoxins', 'CatTrainigs.fillers', 'CatTrainigs.materials', 'CatTrainigs.available_seats', 'CatTrainigs.level','State.name','State.abv','CatTrainigs.address','CatTrainigs.zip','CatTrainigs.city'];
+                    $fields['assistants'] = "(SELECT COUNT(id) from data_trainings DT WHERE DT.training_id = CatTrainigs.id AND DT.deleted = 0)";
+                    $fields['enrolled'] = "(SELECT COUNT(id) from data_trainings DT WHERE DT.training_id = CatTrainigs.id AND DT.deleted = 0 AND DT.user_id = " . USER_ID . " )";
                     $_join = [
-                        'DataTrainigs' => ['table' => 'data_trainings', 'type' => 'INNER', 'conditions' => 'CatTrainigs.id = DataTrainigs.training_id'],
                         'State' => ['table' => 'cat_states', 'type' => 'INNER', 'conditions' => 'State.id = CatTrainigs.state_id']
                     ];
-                    $_where = ['DataTrainigs.user_id' => USER_ID, 'DataTrainigs.deleted' => 0, 'CatTrainigs.deleted' => 0,'(DATE_FORMAT(CatTrainigs.scheduled, "%Y-%m-%d 09:00:00") > "' . $now . '")', 'CatTrainigs.level IN' => ['LEVEL 3 FILLERS','FILLER_COURSE_LEVEL_1']];
+                    $_where = ['CatTrainigs.scheduled >' => $now, 'CatTrainigs.deleted' => 0, 'CatTrainigs.deleted' => 0, 'CatTrainigs.level IN' => $filler_equivalent_levels];
 
-                    
-                    $enrolled_trainings  = $this->CatTrainigs->find()->select($_fields)
+                    $trainingsavailable  = $this->CatTrainigs->find()->select($fields)
                     ->join($_join)
-                    ->where($_where)->first();
+                    ->where($_where)->toArray();
 
-                    if (!empty($enrolled_trainings)) {
+                    foreach ($trainingsavailable as $row) {
+                        $seats = $row['available_seats'] - $row['assistants'];
+                        if($seats <= 0) continue;
 
-                        $seats = $enrolled_trainings['available_seats'] - $enrolled_trainings['assistants'];
-                        if($seats <= 0) $seats = 0;
-
-                        $address = $enrolled_trainings->address.', '.$enrolled_trainings->city.', '.$enrolled_trainings->State['abv'].' '.$enrolled_trainings->zip;
+                        $address = $row->address.', '.$row->city.', '.$row->State['abv'].' '.$row->zip;
                         $tr_result[] = array(
-                            'id'            => $enrolled_trainings['id'],
-                            'title'         => $enrolled_trainings['title'],
-                            'scheduled'   => $enrolled_trainings['scheduled']->i18nFormat('MM-dd-Y hh:mm a'),
+                            'id'            => $row['id'],
+                            'title'         => $row['title'],
+                            'scheduled'   => $row['scheduled']->i18nFormat('MM-dd-Y hh:mm a'),
                             'available_seats' => $seats,
-                            'status' => 'ENROLLED',
+                            'status' => 'JOIN',
                             'address' => $address,
                             'level' => 'Fillers Course Level 1',
                         );
-
-                    } else {
-
-                        // CHECK IF HAVE TRAINING PURCHASE
-
-                        if ($purchased) {
-                            $fields = ['CatTrainigs.id', 'CatTrainigs.title', 'CatTrainigs.scheduled', 'CatTrainigs.neurotoxins', 'CatTrainigs.fillers', 'CatTrainigs.materials', 'CatTrainigs.available_seats', 'CatTrainigs.level','State.name','State.abv','CatTrainigs.address','CatTrainigs.zip','CatTrainigs.city'];
-                            $fields['assistants'] = "(SELECT COUNT(id) from data_trainings DT WHERE DT.training_id = CatTrainigs.id AND DT.deleted = 0)";
-                            $fields['enrolled'] = "(SELECT COUNT(id) from data_trainings DT WHERE DT.training_id = CatTrainigs.id AND DT.deleted = 0 AND DT.user_id = " . USER_ID . " )";
-                            $_join = [
-                                'State' => ['table' => 'cat_states', 'type' => 'INNER', 'conditions' => 'State.id = CatTrainigs.state_id']
-                            ];
-                            $_where = ['CatTrainigs.scheduled >' => $now, 'CatTrainigs.deleted' => 0, 'CatTrainigs.deleted' => 0, 'CatTrainigs.level IN' => ['LEVEL 3 FILLERS','FILLER_COURSE_LEVEL_1']];
-
-                            $trainingsavailable  = $this->CatTrainigs->find()->select($fields)
-                            ->join($_join)
-                            ->where($_where)->toArray();
-
-                            foreach ($trainingsavailable as $row) {
-                                $seats = $row['available_seats'] - $row['assistants'];
-                                if($seats <= 0) continue;
-
-                                $address = $row->address.', '.$row->city.', '.$row->State['abv'].' '.$row->zip;
-                                $tr_result[] = array(
-                                    'id'            => $row['id'],
-                                    'title'         => $row['title'],
-                                    'scheduled'   => $row['scheduled']->i18nFormat('MM-dd-Y hh:mm a'),
-                                    'available_seats' => $seats,
-                                    'status' => 'JOIN',
-                                    'address' => $address,
-                                    'level' => 'Fillers Course Level 1',
-                                );
-                            }
-
-                        }
+                    }
                     }
                 }
             } else{
@@ -23608,7 +23649,7 @@ class MainController extends AppPluginController {
 
         $this->loadModel('SpaLiveV1.DataPayment');
         $payment_medical = $this->DataPayment->find()
-            ->where(['DataPayment.id_from' => USER_ID, 'DataPayment.id_to' => 0,'DataPayment.type' => "ADVANCED COURSE", 
+            ->where(['DataPayment.id_from' => USER_ID, 'DataPayment.id_to' => 0,'DataPayment.type IN' => $advanced_course_payment_types,
                 'DataPayment.payment <>' => '', 'DataPayment.is_visible' => 1,'DataPayment.refund_id' => 0])->first();
 
         $payment = $this->DataPayment->find()
@@ -24178,10 +24219,14 @@ class MainController extends AppPluginController {
         // Stock + prerequisites: basic neurotoxin + (advanced online or LEVEL 2 in-person); see CourseController::validateBasicAndAdvancedTraining
         $fillers = $this->CatProducts->find()->where(['CatProducts.id' => 178, 'CatProducts.deleted' => 0, 'CatProducts.stock' => 1])->first();
         $hasBasicAndAdvancedCourse = CourseController::validateBasicAndAdvancedTraining($this);
+        $hasFillerEquivalentTraining = CourseController::userHasFillerEquivalentTraining($this, (int)USER_ID);
+        if ($hasFillerEquivalentTraining) {
+            $show_buy_button_level_3_fillers = false;
+        }
         $canShowBuyButtonLevel3Fillers = !empty($fillers) && $hasBasicAndAdvancedCourse && $show_buy_button_level_3_fillers;
 
         $message_level_3_fillers_prerequisite = '';
-        if (!empty($fillers) && $show_buy_button_level_3_fillers && !$hasBasicAndAdvancedCourse) {
+        if (!empty($fillers) && $show_buy_button_level_3_fillers && !$hasBasicAndAdvancedCourse && !$hasFillerEquivalentTraining) {
             $message_level_3_fillers_prerequisite = 'To purchase Filler Level 1 you must complete Basic Neurotoxin training and Advanced Neurotoxin or Level 2 (in-person) training.';
         }
 
