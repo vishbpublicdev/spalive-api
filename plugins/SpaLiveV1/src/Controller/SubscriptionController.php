@@ -1909,6 +1909,212 @@ class SubscriptionController extends AppPluginController {
         return;
     }
 
+    private function otSubscriptionRequiresImmediateCharge(bool $is_other_schools, bool $has_cancelled_subscription, bool $is_iv_therapy = false): bool
+    {
+        return $is_other_schools || $has_cancelled_subscription || $is_iv_therapy;
+    }
+
+    private function extractPaymentIntentStripeRefs($stripe_result): array
+    {
+        $refs = [
+            'payment_id' => '',
+            'charge_id' => '',
+            'receipt_url' => '',
+        ];
+        if (!is_object($stripe_result)) {
+            return $refs;
+        }
+        $refs['payment_id'] = !empty($stripe_result->id) ? (string) $stripe_result->id : '';
+        if (!empty($stripe_result->charges->data[0])) {
+            $charge = $stripe_result->charges->data[0];
+            $refs['charge_id'] = !empty($charge->id) ? (string) $charge->id : '';
+            $refs['receipt_url'] = !empty($charge->receipt_url) ? (string) $charge->receipt_url : '';
+        } elseif (!empty($stripe_result->latest_charge)) {
+            if (is_string($stripe_result->latest_charge)) {
+                $refs['charge_id'] = $stripe_result->latest_charge;
+            } elseif (is_object($stripe_result->latest_charge)) {
+                $refs['charge_id'] = !empty($stripe_result->latest_charge->id) ? (string) $stripe_result->latest_charge->id : '';
+                $refs['receipt_url'] = !empty($stripe_result->latest_charge->receipt_url)
+                    ? (string) $stripe_result->latest_charge->receipt_url
+                    : '';
+            }
+        }
+
+        return $refs;
+    }
+
+    private function paymentIntentChargeSucceeded($stripe_result): bool
+    {
+        if (!is_object($stripe_result)) {
+            return false;
+        }
+
+        return ((string) ($stripe_result->status ?? '')) === 'succeeded';
+    }
+
+    /**
+     * @return array{error: string, stripe_result: mixed, payment_id: string, charge_id: string, receipt_url: string}
+     */
+    private function createOtStripePaymentIntent(string $customer_id, string $payment_method, int $amount_cents, string $description = 'OT MySpaLive Subscription'): array
+    {
+        $out = [
+            'error' => '',
+            'stripe_result' => null,
+            'payment_id' => '',
+            'charge_id' => '',
+            'receipt_url' => '',
+        ];
+        if ($amount_cents <= 0) {
+            return $out;
+        }
+
+        \Stripe\Stripe::setApiKey(Configure::read('App.stripe_secret_key'));
+        try {
+            $out['stripe_result'] = \Stripe\PaymentIntent::create([
+                'amount' => $amount_cents,
+                'currency' => 'usd',
+                'customer' => $customer_id,
+                'payment_method' => $payment_method,
+                'off_session' => true,
+                'confirm' => true,
+                'description' => $description,
+                'expand' => ['latest_charge'],
+            ]);
+        } catch (\Throwable $e) {
+            $out['error'] = $e->getMessage();
+
+            return $out;
+        }
+
+        $refs = $this->extractPaymentIntentStripeRefs($out['stripe_result']);
+        $out['payment_id'] = $refs['payment_id'];
+        $out['charge_id'] = $refs['charge_id'];
+        $out['receipt_url'] = $refs['receipt_url'];
+
+        return $out;
+    }
+
+    private function rollbackOtSubscriptionRows(array $subscription_ids): void
+    {
+        $ids = array_filter(array_map('intval', $subscription_ids));
+        if ($ids === []) {
+            return;
+        }
+        $this->loadModel('SpaLiveV1.DataSubscriptions');
+        $this->DataSubscriptions->updateAll(
+            ['status' => 'CANCELLED'],
+            ['id IN' => $ids]
+        );
+    }
+
+    private function saveOtSubscriptionPaymentRow(
+        int $subscription_id,
+        int $total_cents,
+        string $payment_description,
+        string $main_service,
+        string $addons_services,
+        string $payment_details_json,
+        int $doctor_id,
+        array $stripe_refs
+    ): bool {
+        $this->loadModel('SpaLiveV1.DataSubscriptionPayments');
+        $entity = $this->DataSubscriptionPayments->newEntity([
+            'uid' => Text::uuid(),
+            'subscription_id' => $subscription_id,
+            'user_id' => USER_ID,
+            'total' => $total_cents,
+            'payment_id' => $stripe_refs['payment_id'] ?? '',
+            'charge_id' => $stripe_refs['charge_id'] ?? '',
+            'receipt_id' => $stripe_refs['receipt_url'] ?? '',
+            'created' => date('Y-m-d H:i:s'),
+            'error' => '',
+            'status' => 'DONE',
+            'deleted' => 0,
+            'md_id' => $doctor_id,
+            'payment_type' => 'FULL',
+            'payment_description' => $payment_description,
+            'main_service' => $main_service,
+            'addons_services' => $addons_services,
+            'payment_details' => $payment_details_json,
+            'state' => USER_STATE,
+        ]);
+
+        if ($entity->hasErrors()) {
+            return false;
+        }
+
+        return $this->DataSubscriptionPayments->save($entity) !== false;
+    }
+
+    private function persistOtSubscriptionPayments(
+        $msl_subscription,
+        $md_subscription,
+        int $total_msl_cents,
+        int $total_md_cents,
+        array $stripe_refs,
+        int $doctor_id,
+        string $main_service_msl,
+        string $addons_services_msl,
+        array $subs_msl,
+        string $main_service_md,
+        string $addons_services_md,
+        array $subs_md,
+        bool $is_other_schools,
+        bool $is_iv_therapy
+    ): bool {
+        if (empty($msl_subscription) || empty($msl_subscription->id)) {
+            return false;
+        }
+
+        if (!$this->saveOtSubscriptionPaymentRow(
+            (int) $msl_subscription->id,
+            $total_msl_cents,
+            'MSL Subscription',
+            $main_service_msl,
+            $addons_services_msl,
+            json_encode($subs_msl),
+            $doctor_id,
+            $stripe_refs
+        )) {
+            return false;
+        }
+
+        if (!empty($md_subscription) && !empty($md_subscription->id) && count($subs_md) > 0) {
+            if (!$this->saveOtSubscriptionPaymentRow(
+                (int) $md_subscription->id,
+                $total_md_cents,
+                'MD Subscription',
+                $main_service_md,
+                $addons_services_md,
+                json_encode($subs_md),
+                $doctor_id,
+                $stripe_refs
+            )) {
+                return false;
+            }
+
+            if ($is_other_schools || $is_iv_therapy) {
+                $this->loadModel('SpaLiveV1.DataSubscriptionPayments');
+                $md_payment = $this->DataSubscriptionPayments->find()
+                    ->where([
+                        'subscription_id' => (int) $md_subscription->id,
+                        'user_id' => USER_ID,
+                        'status' => 'DONE',
+                        'payment_type' => 'FULL',
+                        'deleted' => 0,
+                    ])
+                    ->order(['id' => 'DESC'])
+                    ->first();
+                if (!empty($md_payment)) {
+                    $Payments = new PaymentsController();
+                    $Payments->pay_sales_rep_schools(USER_ID, $md_payment->id);
+                }
+            }
+        }
+
+        return true;
+    }
+
     public function save_subscription_ot(){
         $this->loadModel('SpaLiveV1.DataSubscriptions');
         $this->loadModel('SpaLiveV1.DataSubscriptionPayments');
@@ -2166,72 +2372,30 @@ class SubscriptionController extends AppPluginController {
             $this->loadModel('SpaLiveV1.DataSubscriptions');
             $this->loadModel('SpaLiveV1.DataSubscriptionPayments');
 
-            $addon_services = '';
             $addon_services = implode(',', $subs_msl_addons);
+            $md_addon_services = '';
+            $requires_immediate_charge = $this->otSubscriptionRequiresImmediateCharge(
+                $is_other_schools,
+                $has_cancelled_subscription,
+                $is_iv_therapy
+            );
+            $charge_amount = (int) ($total_msl_total + $total_md_total);
+            $stripe_refs = $this->createOtStripePaymentIntent($customer['id'], $payment_method, $charge_amount);
 
-
-            if ($is_other_schools || $has_cancelled_subscription || $is_iv_therapy) {
-
-                $error = '';
-                try {
-                    $stripe_result = \Stripe\PaymentIntent::create([
-                    'amount' => $total_msl_total + $total_md_total,
-                    'currency' => 'usd',
-                    'customer' => $customer['id'],
-                    'payment_method' => $payment_method,
-                    'off_session' => true,
-                    'confirm' => true,
-                    'description' => 'OT MySpaLive Subscription'
-                    ]);
-                } catch(Stripe_CardError $e) {
-                    $error = $e->getMessage();
-                } catch (Stripe_InvalidRequestError $e) {
-                    // Invalid parameters were supplied to Stripe's API
-                    $error = $e->getMessage();
-                } catch (Stripe_AuthenticationError $e) {
-                    // Authentication with Stripe's API failed
-                    $error = $e->getMessage();
-                } catch (Stripe_ApiConnectionError $e) {
-                    // Network communication with Stripe failed
-                    $error = $e->getMessage();
-                } catch (Stripe_Error $e) {
-                    // Display a very generic error to the user, and maybe send
-                    // yourself an email
-                    $error = $e->getMessage();
-                } catch (Exception $e) {
-                    // Something else happened, completely unrelated to Stripe
-                    $error = $e->getMessage();
-                } catch(\Stripe\Exception\CardException $e) {
-                    // Since it's a decline, \Stripe\Exception\CardException will be caught
-                    $error = $e->getMessage();
-                } catch (\Stripe\Exception\RateLimitException $e) {
-                    // Too many requests made to the API too quickly
-                    $error = $e->getMessage();
-                } catch (\Stripe\Exception\InvalidRequestException $e) {
-                    // Invalid parameters were supplied to Stripe's API
-                    $error = $e->getMessage();
-                } catch (\Stripe\Exception\AuthenticationException $e) {
-                    // Authentication with Stripe's API failed
-                    // (maybe you changed API keys recently)
-                    $error = $e->getMessage();
-                } catch (\Stripe\Exception\ApiErrorException $e) {
-                    // Display a very generic error to the user, and maybe send
-                    // yourself an email
-                    $error = $e->getMessage();
-                }
-    
-                if(isset($stripe_result->charges->data[0]->receipt_url)) {
-                    $receipt_url = $stripe_result->charges->data[0]->receipt_url;
-                    $id_charge = $stripe_result->charges->data[0]->id;
-                    $payment_id = $stripe_result->id;
-                }
-    
-                if(!empty($error)) {
+            if ($requires_immediate_charge) {
+                if (!empty($stripe_refs['error'])) {
                     $this->message('Your payment method is not valid. Add a new payment method and try again.');
                     return;
                 }
-
+                if ($charge_amount > 0 && !$this->paymentIntentChargeSucceeded($stripe_refs['stripe_result'])) {
+                    $this->message('Your payment could not be completed. Add a new payment method and try again.');
+                    return;
+                }
             }
+
+            $msl_id = null;
+            $md_id = null;
+            $new_subscription_ids = [];
 
             $s_entity = $this->DataSubscriptions->newEntity([
                 'uid'		=> $this->DataSubscriptions->new_uid(),
@@ -2252,121 +2416,99 @@ class SubscriptionController extends AppPluginController {
                 'addons_services' => $addon_services,
                 'payment_details' => json_encode($subs_msl),
                 'state' => USER_STATE,
+                'monthly' => '1',
+                'other_school' => $is_other_schools ? 1 : 0,
             ]);
 
-            if(!$s_entity->hasErrors()) {
-                $msl_id = $this->DataSubscriptions->save($s_entity);
-                $this->set('msl_subscription_id', $msl_id->id);
+            if ($s_entity->hasErrors()) {
+                $this->message('Could not create subscription.');
+                return;
+            }
 
+            $msl_id = $this->DataSubscriptions->save($s_entity);
+            if (empty($msl_id)) {
+                $this->message('Could not create subscription.');
+                return;
+            }
+            $new_subscription_ids[] = (int) $msl_id->id;
+            $this->set('msl_subscription_id', $msl_id->id);
 
-                 // Si encontramos coincidencias, cancelar TODAS las suscripciones HOLD del usuario
+            if (count($subs_md) > 0) {
+                $md_addon_services = implode(',', $subs_md_addons);
 
-                foreach($ent_subscription_hold_check as $hold_sub) {
-                    $hold_sub->status = 'CANCELLED';
-                    $this->DataSubscriptions->save($hold_sub);
+                $m_entity = $this->DataSubscriptions->newEntity([
+                    'uid'		=> $this->DataSubscriptions->new_uid(),
+                    'event'		=> 'save_subscription',
+                    'payload'	=> '',
+                    'user_id'	=> USER_ID,
+                    'request_id'	=> '',
+                    'status' => 'ACTIVE',
+                    'data_object_id' => '',
+                    'customer_id' => $customer['id'],
+                    'payment_method' => $payment_method,
+                    'subscription_type' => 'SUBSCRIPTIONMD',
+                    'total' =>$_total_md,
+                    'subtotal' => $total_md_total,
+                    'promo_code' => get('promo_code',''),
+                    'agreement_id' => 0,
+                    'main_service' => $main_service_md,
+                    'addons_services' => $md_addon_services,
+                    'payment_details' => json_encode($subs_md),
+                    'state' => USER_STATE,
+                    'monthly' => '1',
+                    'other_school' => $is_other_schools ? 1 : 0,
+                ]);
+
+                if ($m_entity->hasErrors()) {
+                    $this->rollbackOtSubscriptionRows($new_subscription_ids);
+                    $this->message('Could not create subscription.');
+                    return;
                 }
-                
 
-                if (count($subs_md) > 0) {
+                $md_id = $this->DataSubscriptions->save($m_entity);
+                if (empty($md_id)) {
+                    $this->rollbackOtSubscriptionRows($new_subscription_ids);
+                    $this->message('Could not create subscription.');
+                    return;
+                }
+                $new_subscription_ids[] = (int) $md_id->id;
+                $this->set('md_subscription_id', $md_id->id);
+            }
 
-                    $addon_services = '';
-                    $addon_services = implode(',', $subs_md_addons);
+            if ($requires_immediate_charge) {
+                $this->loadModel('SpaLiveV1.SysUserAdmin');
+                $subscriptionIncludesFillers = isset($subs_md['FILLERS']) || isset($subs_msl['FILLERS'])
+                    || in_array('FILLERS', $subs_md_addons, true)
+                    || in_array('FILLERS', $subs_msl_addons, true);
+                $doctor_id = $subscriptionIncludesFillers
+                    ? $this->SysUserAdmin->getAssignedDoctorForContext((int)USER_ID, ['isFillers' => true])
+                    : $this->SysUserAdmin->getAssignedDoctorInjector((int)USER_ID);
 
-                    $m_entity = $this->DataSubscriptions->newEntity([
-                        'uid'		=> $this->DataSubscriptions->new_uid(),
-                        'event'		=> 'save_subscription',
-                        'payload'	=> '',
-                        'user_id'	=> USER_ID,
-                        'request_id'	=> '',
-                        'status' => 'ACTIVE',
-                        'data_object_id' => '',
-                        'customer_id' => $customer['id'],
-                        'payment_method' => $payment_method,
-                        'subscription_type' => 'SUBSCRIPTIONMD',
-                        'total' =>$_total_md,
-                        'subtotal' => $total_md_total,
-                        'promo_code' => get('promo_code',''),
-                        'agreement_id' => 0,
-                        'main_service' => $main_service_md,
-                        'addons_services' => $addon_services,
-                        'payment_details' => json_encode($subs_md),
-                        'state' => USER_STATE,
-                    ]);
-
-                    if(!$m_entity->hasErrors()) {
-
-                        $md_id = $this->DataSubscriptions->save($m_entity);
-
-                        $this->set('msl_subscription_id', $md_id->id);
-
-                        $this->success();
-                    }
+                if (!$this->persistOtSubscriptionPayments(
+                    $msl_id,
+                    $md_id,
+                    (int) $total_msl_total,
+                    (int) $total_md_total,
+                    $stripe_refs,
+                    (int) $doctor_id,
+                    $main_service_msl,
+                    $addon_services,
+                    $subs_msl,
+                    $main_service_md,
+                    $md_addon_services,
+                    $subs_md,
+                    $is_other_schools,
+                    $is_iv_therapy
+                )) {
+                    $this->rollbackOtSubscriptionRows($new_subscription_ids);
+                    $this->message('Payment was processed but the subscription could not be finalized. Please contact support.');
+                    return;
                 }
             }
 
-            if ($is_other_schools || $has_cancelled_subscription || $is_iv_therapy) {
-
-                if(empty($error) && $stripe_result->status == 'succeeded') {
-                    $subscriptionIncludesFillers = isset($subs_md['FILLERS']) || isset($subs_msl['FILLERS'])
-                        || in_array('FILLERS', $subs_md_addons, true)
-                        || in_array('FILLERS', $subs_msl_addons, true);
-                    $doctor_id = $subscriptionIncludesFillers
-                        ? $this->SysUserAdmin->getAssignedDoctorForContext((int)USER_ID, ['isFillers' => true])
-                        : $this->SysUserAdmin->getAssignedDoctorInjector((int)USER_ID);
-
-                    $c_entity = $this->DataSubscriptionPayments->newEntity([
-                        'uid'   => Text::uuid(),
-                        'subscription_id'  => $msl_id->id,
-                        'user_id'  => USER_ID,
-                        'total'  => $total_msl_total,
-                        'payment_id'  => $payment_id,
-                        'charge_id'  => $id_charge,
-                        'receipt_id'  => $receipt_url,
-                        'created'   => date('Y-m-d H:i:s'),
-                        'error' => $error,
-                        'status' => 'DONE',
-                        'deleted' => 0,
-                        'md_id' => $doctor_id,
-
-                        'payment_type' => 'FULL',
-                        'payment_description' => 'MSL Subscription',
-                        'main_service' => $main_service_msl,
-                        'addons_services' => $addon_services,
-                        'payment_details' => json_encode($subs_msl),
-                        'state' => USER_STATE,
-                    ]);
-
-                    $aux_payment = $this->DataSubscriptionPayments->save($c_entity);
-
-                    $z_entity = $this->DataSubscriptionPayments->newEntity([
-                        'uid'   => Text::uuid(),
-                        'subscription_id'  => $md_id->id,
-                        'user_id'  => USER_ID,
-                        'total'  => $total_md_total,
-                        'payment_id'  => $payment_id,
-                        'charge_id'  => $id_charge,
-                        'receipt_id'  => $receipt_url,
-                        'created'   => date('Y-m-d H:i:s'),
-                        'error' => $error,
-                        'status' => 'DONE',
-                        'deleted' => 0,
-                        'md_id' => $doctor_id,
-
-                        'payment_type' => 'FULL',
-                        'payment_description' => 'MD Subscription',
-                        'main_service' => $main_service_md,
-                        'addons_services' => $addon_services,
-                        'payment_details' => json_encode($subs_md),
-                        'state' => USER_STATE,
-                    ]);
-
-                    $a_payment = $this->DataSubscriptionPayments->save($z_entity);
-
-                    if($is_other_schools || $is_iv_therapy){
-                        $Payments = new PaymentsController();
-                        $x = $Payments->pay_sales_rep_schools(USER_ID, $a_payment->id);
-                    }
-                }
+            foreach ($ent_subscription_hold_check as $hold_sub) {
+                $hold_sub->status = 'CANCELLED';
+                $this->DataSubscriptions->save($hold_sub);
             }
 
             $user = $this->SysUsers->find()->where(['id' => USER_ID])->first();
@@ -2714,76 +2856,30 @@ class SubscriptionController extends AppPluginController {
             $this->loadModel('SpaLiveV1.DataSubscriptions');
             $this->loadModel('SpaLiveV1.DataSubscriptionPayments');
 
-            $addon_services = '';
             $addon_services = $this->normalize_addons_services(implode(',', $subs_msl_addons));
-                    
-            // Inicializar variables de pago
-            $error = '';
-            $receipt_url = '';
-            $id_charge = '';
-            $payment_id = '';
+            $md_addon_services = '';
+            $requires_immediate_charge = $this->otSubscriptionRequiresImmediateCharge(
+                $is_other_schools,
+                $has_cancelled_subscription,
+                false
+            );
+            $charge_amount = (int) ($total_msl_total + $total_md_total);
+            $stripe_refs = $this->createOtStripePaymentIntent($customer['id'], $payment_method, $charge_amount);
 
-            // Procesar pago si tiene suscripciones canceladas o HOLD
-            if ($has_cancelled_subscription || $is_other_schools) {
-                try {
-                    $stripe_result = \Stripe\PaymentIntent::create([
-                    'amount' => $total_msl_total + $total_md_total,
-                    'currency' => 'usd',
-                    'customer' => $customer['id'],
-                    'payment_method' => $payment_method,
-                    'off_session' => true,
-                    'confirm' => true,
-                    'description' => 'OT MySpaLive Subscription'
-                    ]);
-                } catch(Stripe_CardError $e) {
-                    $error = $e->getMessage();
-                } catch (Stripe_InvalidRequestError $e) {
-                    // Invalid parameters were supplied to Stripe's API
-                    $error = $e->getMessage();
-                } catch (Stripe_AuthenticationError $e) {
-                    // Authentication with Stripe's API failed
-                    $error = $e->getMessage();
-                } catch (Stripe_ApiConnectionError $e) {
-                    // Network communication with Stripe failed
-                    $error = $e->getMessage();
-                } catch (Stripe_Error $e) {
-                    // Display a very generic error to the user, and maybe send
-                    // yourself an email
-                    $error = $e->getMessage();
-                } catch (Exception $e) {
-                    // Something else happened, completely unrelated to Stripe
-                    $error = $e->getMessage();
-                } catch(\Stripe\Exception\CardException $e) {
-                    // Since it's a decline, \Stripe\Exception\CardException will be caught
-                    $error = $e->getMessage();
-                } catch (\Stripe\Exception\RateLimitException $e) {
-                    // Too many requests made to the API too quickly
-                    $error = $e->getMessage();
-                } catch (\Stripe\Exception\InvalidRequestException $e) {
-                    // Invalid parameters were supplied to Stripe's API
-                    $error = $e->getMessage();
-                } catch (\Stripe\Exception\AuthenticationException $e) {
-                    // Authentication with Stripe's API failed
-                    // (maybe you changed API keys recently)
-                    $error = $e->getMessage();
-                } catch (\Stripe\Exception\ApiErrorException $e) {
-                    // Display a very generic error to the user, and maybe send
-                    // yourself an email
-                    $error = $e->getMessage();
-                }
-    
-                if(isset($stripe_result->charges->data[0]->receipt_url)) {
-                    $receipt_url = $stripe_result->charges->data[0]->receipt_url;
-                    $id_charge = $stripe_result->charges->data[0]->id;
-                    $payment_id = $stripe_result->id;
-                }
-    
-                if(!empty($error)) {
+            if ($requires_immediate_charge) {
+                if (!empty($stripe_refs['error'])) {
                     $this->message('Your payment method is not valid. Add a new payment method and try again.');
                     return;
                 }
-
+                if ($charge_amount > 0 && !$this->paymentIntentChargeSucceeded($stripe_refs['stripe_result'])) {
+                    $this->message('Your payment could not be completed. Add a new payment method and try again.');
+                    return;
+                }
             }
+
+            $msl_id = null;
+            $md_id = null;
+            $new_subscription_ids = [];
 
             $s_entity = $this->DataSubscriptions->newEntity([
                 'uid'		=> $this->DataSubscriptions->new_uid(),
@@ -2804,124 +2900,99 @@ class SubscriptionController extends AppPluginController {
                 'addons_services' => $addon_services,
                 'payment_details' => json_encode($subs_msl),
                 'state' => USER_STATE,
+                'monthly' => '1',
+                'other_school' => $is_other_schools ? 1 : 0,
             ]);
 
-            if(!$s_entity->hasErrors()) {
+            if ($s_entity->hasErrors()) {
+                $this->message('Could not create subscription.');
+                return;
+            }
 
-                 // Si encontramos coincidencias, cancelar TODAS las suscripciones HOLD del usuario
+            $msl_id = $this->DataSubscriptions->save($s_entity);
+            if (empty($msl_id)) {
+                $this->message('Could not create subscription.');
+                return;
+            }
+            $new_subscription_ids[] = (int) $msl_id->id;
+            $this->set('msl_subscription_id', $msl_id->id);
 
-                foreach($ent_subscription_hold_check as $hold_sub) {
-                    $hold_sub->status = 'CANCELLED';
-                    $this->DataSubscriptions->save($hold_sub);
+            if (count($subs_md) > 0) {
+                $md_addon_services = $this->normalize_addons_services(implode(',', $subs_md_addons));
+
+                $m_entity = $this->DataSubscriptions->newEntity([
+                    'uid'		=> $this->DataSubscriptions->new_uid(),
+                    'event'		=> 'save_subscription',
+                    'payload'	=> '',
+                    'user_id'	=> USER_ID,
+                    'request_id'	=> '',
+                    'status' => 'ACTIVE',
+                    'data_object_id' => '',
+                    'customer_id' => $customer['id'],
+                    'payment_method' => $payment_method,
+                    'subscription_type' => 'SUBSCRIPTIONMD',
+                    'total' =>$_total_md,
+                    'subtotal' => $total_md_total,
+                    'promo_code' => get('promo_code',''),
+                    'agreement_id' => 0,
+                    'main_service' => $main_service_md,
+                    'addons_services' => $md_addon_services,
+                    'payment_details' => json_encode($subs_md),
+                    'state' => USER_STATE,
+                    'monthly' => '1',
+                    'other_school' => $is_other_schools ? 1 : 0,
+                ]);
+
+                if ($m_entity->hasErrors()) {
+                    $this->rollbackOtSubscriptionRows($new_subscription_ids);
+                    $this->message('Could not create subscription.');
+                    return;
                 }
 
-                $msl_id = $this->DataSubscriptions->save($s_entity);
-                $this->set('msl_subscription_id', $msl_id->id);
+                $md_id = $this->DataSubscriptions->save($m_entity);
+                if (empty($md_id)) {
+                    $this->rollbackOtSubscriptionRows($new_subscription_ids);
+                    $this->message('Could not create subscription.');
+                    return;
+                }
+                $new_subscription_ids[] = (int) $md_id->id;
+                $this->set('md_subscription_id', $md_id->id);
+            }
 
-                if (count($subs_md) > 0) {
+            if ($requires_immediate_charge) {
+                $this->loadModel('SpaLiveV1.SysUserAdmin');
+                $subscriptionIncludesFillers = isset($subs_md['FILLERS']) || isset($subs_msl['FILLERS'])
+                    || in_array('FILLERS', $subs_md_addons, true)
+                    || in_array('FILLERS', $subs_msl_addons, true);
+                $doctor_id = $subscriptionIncludesFillers
+                    ? $this->SysUserAdmin->getAssignedDoctorForContext((int)USER_ID, ['isFillers' => true])
+                    : $this->SysUserAdmin->getAssignedDoctorInjector((int)USER_ID);
 
-                    $addon_services = '';
-                    $addon_services = $this->normalize_addons_services(implode(',', $subs_md_addons));
-
-                    $m_entity = $this->DataSubscriptions->newEntity([
-                        'uid'		=> $this->DataSubscriptions->new_uid(),
-                        'event'		=> 'save_subscription',
-                        'payload'	=> '',
-                        'user_id'	=> USER_ID,
-                        'request_id'	=> '',
-                        'status' => 'ACTIVE',
-                        'data_object_id' => '',
-                        'customer_id' => $customer['id'],
-                        'payment_method' => $payment_method,
-                        'subscription_type' => 'SUBSCRIPTIONMD',
-                        'total' =>$_total_md,
-                        'subtotal' => $total_md_total,
-                        'promo_code' => get('promo_code',''),
-                        'agreement_id' => 0,
-                        'main_service' => $main_service_md,
-                        'addons_services' => $addon_services,
-                        'payment_details' => json_encode($subs_md),
-                        'state' => USER_STATE,
-                    ]);
-
-                    if(!$m_entity->hasErrors()) {
-
-                        $md_id = $this->DataSubscriptions->save($m_entity);
-
-                        $this->set('msl_subscription_id', $md_id->id);
-
-                    }
+                if (!$this->persistOtSubscriptionPayments(
+                    $msl_id,
+                    $md_id,
+                    (int) $total_msl_total,
+                    (int) $total_md_total,
+                    $stripe_refs,
+                    (int) $doctor_id,
+                    $main_service_msl,
+                    $addon_services,
+                    $subs_msl,
+                    $main_service_md,
+                    $md_addon_services,
+                    $subs_md,
+                    $is_other_schools,
+                    false
+                )) {
+                    $this->rollbackOtSubscriptionRows($new_subscription_ids);
+                    $this->message('Payment was processed but the subscription could not be finalized. Please contact support.');
+                    return;
                 }
             }
 
-            // Guardar pagos si se procesó el cobro
-            if ($has_cancelled_subscription || $is_other_schools) {
-
-                if(empty($error) && $stripe_result->status == 'succeeded') {
-                    $subscriptionIncludesFillers = isset($subs_md['FILLERS']) || isset($subs_msl['FILLERS'])
-                        || in_array('FILLERS', $subs_md_addons, true)
-                        || in_array('FILLERS', $subs_msl_addons, true);
-                    $doctor_id = $subscriptionIncludesFillers
-                        ? $this->SysUserAdmin->getAssignedDoctorForContext((int)USER_ID, ['isFillers' => true])
-                        : $this->SysUserAdmin->getAssignedDoctorInjector((int)USER_ID);
-
-                    $c_entity = $this->DataSubscriptionPayments->newEntity([
-                        'uid'   => Text::uuid(),
-                        'subscription_id'  => $msl_id->id,
-                        'user_id'  => USER_ID,
-                        'total'  => $total_msl_total,
-                        'payment_id'  => $payment_id,
-                        'charge_id'  => $id_charge,
-                        'receipt_id'  => $receipt_url,
-                        'created'   => date('Y-m-d H:i:s'),
-                        'error' => $error,
-                        'status' => 'DONE',
-                        'deleted' => 0,
-                        'md_id' => $doctor_id,
-
-                        'payment_type' => 'FULL',
-                        'payment_description' => 'MSL Subscription',
-                        'main_service' => $main_service_msl,
-                        'addons_services' => $addon_services,
-                        'payment_details' => json_encode($subs_msl),
-                        'state' => USER_STATE,
-                    ]);
-
-                    $aux_payment = $this->DataSubscriptionPayments->save($c_entity);
-
-                    if (count($subs_md) > 0) {
-                        $addon_services_md = $this->normalize_addons_services(implode(',', $subs_md_addons));
-                        
-                        $z_entity = $this->DataSubscriptionPayments->newEntity([
-                            'uid'   => Text::uuid(),
-                            'subscription_id'  => $md_id->id,
-                            'user_id'  => USER_ID,
-                            'total'  => $total_md_total,
-                            'payment_id'  => $payment_id,
-                            'charge_id'  => $id_charge,
-                            'receipt_id'  => $receipt_url,
-                            'created'   => date('Y-m-d H:i:s'),
-                            'error' => $error,
-                            'status' => 'DONE',
-                            'deleted' => 0,
-                            'md_id' => $doctor_id,
-
-                            'payment_type' => 'FULL',
-                            'payment_description' => 'MD Subscription',
-                            'main_service' => $main_service_md,
-                            'addons_services' => $addon_services_md,
-                            'payment_details' => json_encode($subs_md),
-                            'state' => USER_STATE,
-                        ]);
-
-                        $a_payment = $this->DataSubscriptionPayments->save($z_entity);
-
-                        if($is_other_schools){
-                            $Payments = new PaymentsController();
-                            $x = $Payments->pay_sales_rep_schools(USER_ID, $a_payment->id);
-                        }
-                    }
-                }
+            foreach ($ent_subscription_hold_check as $hold_sub) {
+                $hold_sub->status = 'CANCELLED';
+                $this->DataSubscriptions->save($hold_sub);
             }
 
             $user = $this->SysUsers->find()->where(['id' => USER_ID])->first();
