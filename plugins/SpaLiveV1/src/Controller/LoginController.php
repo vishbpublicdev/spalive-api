@@ -4255,7 +4255,8 @@ class LoginController extends AppPluginController{
         $Partially = new \SpaLiveV1\Controller\PartiallyController();
         $Partially->initialize();
         $deferred_offer_id = isset($Partially->deferred_offers['basic']) && !empty($Partially->deferred_offers['basic']) ? $Partially->deferred_offers['basic'] : null;
-        $this->setCourseInstallmentsFlags(!empty($deferred_offer_id), '');
+        $installments_deferred = !empty($deferred_offer_id);
+        $this->setCourseInstallmentsFlags($installments_deferred, $this->installmentsExternalShopUrl($installments_deferred));
 
         $this->set('title_option', 'Neurotoxin Course - Level 1: $' . $training_amount);
         $this->set('training_amount', $training_amount);
@@ -4283,6 +4284,13 @@ class LoginController extends AppPluginController{
         $this->set('installments_deferred', $installmentsDeferred ? true : false);
         $url = ($installmentsDeferred && !empty($externalUrl)) ? (string) $externalUrl : '';
         $this->set('installments_external_url', $url);
+    }
+
+    /**
+     * Port2Pay shop URL when installments are enabled; empty otherwise (legacy in-app Partially flow).
+     */
+    private function installmentsExternalShopUrl(bool $installmentsDeferred): string {
+        return $installmentsDeferred ? 'https://port2pay.com/Shop' : '';
     }
 
     private function getSalesRep() {
@@ -4397,7 +4405,8 @@ class LoginController extends AppPluginController{
         $Partially = new \SpaLiveV1\Controller\PartiallyController();
         $Partially->initialize();
         $deferred_offer_id = isset($Partially->deferred_offers['advanced']) && !empty($Partially->deferred_offers['advanced']) ? $Partially->deferred_offers['advanced'] : null;
-        $this->setCourseInstallmentsFlags(!empty($deferred_offer_id), '');
+        $installments_deferred = !empty($deferred_offer_id);
+        $this->setCourseInstallmentsFlags($installments_deferred, $this->installmentsExternalShopUrl($installments_deferred));
 
         $this->set('title_option', 'Neurotoxin Course - Level 2 $' . $training_amount);
         $this->set('training_amount', $training_amount);
@@ -4459,9 +4468,7 @@ class LoginController extends AppPluginController{
         $Partially->initialize();
         $deferred_offer_id = isset($Partially->deferred_offers['level_3']) && !empty($Partially->deferred_offers['level_3']) ? $Partially->deferred_offers['level_3'] : null;
         $installments_deferred = !empty($deferred_offer_id);
-        // When installments are enabled, send users to external checkout (empty string = legacy in-app flow).
-        $installments_external_url = $installments_deferred ? 'https://port2pay.com/Shop' : '';
-        $this->setCourseInstallmentsFlags($installments_deferred, $installments_external_url);
+        $this->setCourseInstallmentsFlags($installments_deferred, $this->installmentsExternalShopUrl($installments_deferred));
 
         $this->set('title_option', 'Filler Course Level 1 - $' . $training_amount);
         $this->set('training_amount', $training_amount);
@@ -4537,7 +4544,8 @@ class LoginController extends AppPluginController{
         $Partially = new \SpaLiveV1\Controller\PartiallyController();
         $Partially->initialize();
         $deferred_offer_id = isset($Partially->deferred_offers['level_3']) && !empty($Partially->deferred_offers['level_3']) ? $Partially->deferred_offers['level_3'] : null;
-        $this->setCourseInstallmentsFlags(!empty($deferred_offer_id), '');
+        $installments_deferred = !empty($deferred_offer_id);
+        $this->setCourseInstallmentsFlags($installments_deferred, $this->installmentsExternalShopUrl($installments_deferred));
 
         $this->set('title_option', 'Level 3 Elite Techniques Course $' . $training_amount);
         $this->set('training_amount', $training_amount);
@@ -4593,7 +4601,8 @@ class LoginController extends AppPluginController{
         $Partially = new \SpaLiveV1\Controller\PartiallyController();
         $Partially->initialize();
         $deferred_offer_id = isset($Partially->deferred_offers['elite']) && !empty($Partially->deferred_offers['elite']) ? $Partially->deferred_offers['elite'] : null;
-        $this->setCourseInstallmentsFlags(!empty($deferred_offer_id), '');
+        $installments_deferred = !empty($deferred_offer_id);
+        $this->setCourseInstallmentsFlags($installments_deferred, $this->installmentsExternalShopUrl($installments_deferred));
 
         $this->set('title_option', 'ToxTune-Up Sessions $' . $this->level_1_1/100);
         $this->set('total', $this->level_1_1/100);
