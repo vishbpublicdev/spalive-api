@@ -13,6 +13,7 @@ use Throwable;
 /**
  * Phase A: sys_users -> auth.users (via Admin API) + auth.identities + public.user_profiles (+ public.patients)
  * Also maintains public.migration_sys_users_map and a DB checkpoint for resumable runs.
+ * Map table allows the same auth_user_id for multiple legacy_user_id rows (duplicate emails in legacy).
  *
  * --config selects DB credentials only. For LIVE, pass explicitly in cron/CLI, e.g.:
  *   --config config/migration_sys_users_LIVE.php
@@ -100,9 +101,10 @@ class MigrateSysUsersAuthProfilesCommand extends Command
             return static::CODE_ERROR;
         }
 
-        // CREATE IF NOT EXISTS only — needed in dry-run too on a fresh LIVE DB (dev already had these from earlier runs).
-        $this->ensureCheckpointTable($target);
-        $this->ensureMapTable($target);
+        if (!$dryRun) {
+            $this->ensureCheckpointTable($target);
+            $this->ensureMapTable($target);
+        }
 
         $lastId = $fromId > 0 ? $fromId : 0;
         // Resume cursor must apply in dry-run too; otherwise scans always start from 0 and look "wrong".
@@ -434,7 +436,7 @@ class MigrateSysUsersAuthProfilesCommand extends Command
               legacy_user_id bigint PRIMARY KEY,
               legacy_uid text,
               legacy_email text,
-              auth_user_id uuid UNIQUE,
+              auth_user_id uuid,
               user_profile_id uuid,
               mapped_app_role text,
               migrated_at timestamptz NOT NULL DEFAULT now()
