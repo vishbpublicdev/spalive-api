@@ -24,6 +24,20 @@ class QualiphyController extends AppPluginController{
 
     private $service_uid = '1q2we3-r4t5y6-7ui8o990';
 
+    /**
+     * When false, GFE OT uses in-house examiners + Zoom. Qualiphy OT path stays intact when true.
+     */
+    protected function useQualiphyGfe(): bool
+    {
+        $v = env('USE_QUALIPHY_GFE', 'true');
+        if (is_bool($v)) {
+            return $v;
+        }
+        $v = strtolower(trim((string) $v));
+
+        return !in_array($v, ['0', 'false', 'no', 'off'], true);
+    }
+
     public function initialize() : void{
         parent::initialize();
         $this->loadModel('SpaLiveV1.AppToken');
@@ -1177,6 +1191,64 @@ class QualiphyController extends AppPluginController{
                 'state' => USER_STATE,
                 'course_type_id' => $ent_training['CCT']['id'],
             );
+
+            if (!$this->useQualiphyGfe()) {
+                $this->set('use_qualiphy_gfe', false);
+                $this->set('gfe_provider', 'examiner_zoom');
+
+                $r = $Main->generateMeeting($schedule_date);
+                if (!$r) {
+                    return;
+                }
+
+                $array_save['meeting'] = $r['id'];
+                $array_save['meeting_pass'] = $r['password'];
+                $array_save['join_url'] = $r['join_url'] ?? '';
+                $this->set('meeting_id', $r['id']);
+                $this->set('meeting_pass', $r['password']);
+                if (!empty($r['join_url'])) {
+                    $this->set('meeting_url', $r['join_url']);
+                }
+                if (!empty($r['jwt'])) {
+                    $this->set('jwt', $r['jwt']);
+                }
+
+                $c_entity = $this->DataConsultation->newEntity($array_save);
+                if (!$c_entity->hasErrors() && $this->DataConsultation->save($c_entity)) {
+                    $string_answers = get('answers', '');
+                    if (!empty($string_answers)) {
+                        $arr_answers = json_decode($string_answers, true);
+                        if (is_array($arr_answers)) {
+                            foreach ($arr_answers as $row) {
+                                $arr_save_q = [
+                                    'uid' => Text::uuid(),
+                                    'consultation_id' => $c_entity->id,
+                                    'question_id' => $row['id'],
+                                    'response' => $row['response'],
+                                    'details' => $row['details'] ?? '',
+                                    'deleted' => 0,
+                                ];
+                                $cq_entity = $this->DataConsultationAnswers->newEntity($arr_save_q);
+                                if (!$cq_entity->hasErrors()) {
+                                    $this->DataConsultationAnswers->save($cq_entity);
+                                }
+                            }
+                        }
+                    }
+
+                    if (!$Main->notifyExaminersForWaitingRoomGfe($user, $patient_id, $consultation_uid, $array_save['meeting'], $array_save['meeting_pass'], $schedule_by, $schedule_date)) {
+                        $this->message('No examiners available.');
+                        $this->success(false);
+                        return;
+                    }
+
+                    $this->set('uid', $consultation_uid);
+                    $this->success();
+                }
+                return;
+            }
+
+            $this->set('use_qualiphy_gfe', true);
 
             $r = $this->generate_meeting_ot($gfe_id, array('consultation_uid' => $consultation_uid, 'user_uid' => USER_UID));
 

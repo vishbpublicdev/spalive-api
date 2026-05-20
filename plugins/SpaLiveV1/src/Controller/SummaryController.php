@@ -65,6 +65,17 @@ class SummaryController extends AppPluginController{
         return $this->mailgunKey;
     }
 
+    protected function qualiphyGfeEnabledForSummary(): bool
+    {
+        $v = env('USE_QUALIPHY_GFE', 'true');
+        if (is_bool($v)) {
+            return $v;
+        }
+        $v = strtolower(trim((string) $v));
+
+        return !in_array($v, ['0', 'false', 'no', 'off'], true);
+    }
+
 	public function initialize() : void{
         parent::initialize();
         $this->URL_API = env('URL_API', 'https://api.myspalive.com/');
@@ -185,6 +196,7 @@ class SummaryController extends AppPluginController{
         }
 
         $this->set('text_after_gfe', "If your exam was completed correctly, your examiner will process the GFE.\n\nOnce it's finalized, you will receive a notification.\n\nThe GFE will also be available in the Good Faith Exams section of this app, which you can find by opening the menu button of this app.\n\nIf your exam did not complete correctly, please try again.");
+        $this->set('use_qualiphy_gfe', $this->qualiphyGfeEnabledForSummary());
 
         //treatments controller para separar los tratamientos
         $Treatments = new TreatmentsController();
@@ -2395,6 +2407,7 @@ class SummaryController extends AppPluginController{
         $this->set('emergencyPhone2', $this->emergencyPhone2);
 
         $userType = $user['user_role'];
+        $this->set('use_qualiphy_gfe', $this->qualiphyGfeEnabledForSummary());
         $this->loadModel('SpaLiveV1.DataMessages');
         $c_count = $this->DataMessages->find()->select(['DataMessages.id'])->where(["DataMessages.deleted" => 0,'DataMessages.id_to' => USER_ID, 'DataMessages.readed' => 0])->count();
         $this->set('unread_messages', $c_count);
@@ -6266,6 +6279,8 @@ class SummaryController extends AppPluginController{
             $this->set('session', false);
             return;
         }
+
+        $this->set('use_qualiphy_gfe', $this->qualiphyGfeEnabledForSummary());
 
         //Neurotoxins status
         $this->loadModel('SpaLiveV1.CatTrainings');

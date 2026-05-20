@@ -17007,6 +17007,13 @@ class MainController extends AppPluginController {
                 return;
             }
 
+            $resolved = $this->resolveGfeCallTypeFromTreatments($string_treatments);
+            if ($resolved === null) {
+                $this->message('Treatment not found');
+                return;
+            }
+            $string_treatments = $resolved['call_type'];
+
             $schedule_by = 0;
             $schedule_date = get('schedule_date','');
             if (!empty($schedule_date)) {
@@ -17021,15 +17028,30 @@ class MainController extends AppPluginController {
             $patient_id = USER_ID;
             
             $this->loadModel('SpaLiveV1.SysUsers');
-            if ($user['user_role'] == 'clinic' /* || $user['user_role'] == 'injector' || $user['user_role'] == 'gfe+ci'*/) {
-
+            if (in_array($user['user_role'], ['clinic', 'injector', 'gfe+ci'], true)) {
                 $_patient_id = $this->SysUsers->uid_to_id(get('patient_uid', ''));
-                // $this->message($_patient_id);
-                if($_patient_id <= 0) {
+                if ($_patient_id <= 0) {
                     $this->message('The patient does not exist.');
                     return;
                 }
                 $patient_id = $_patient_id;
+            }
+
+            $this->loadModel('SpaLiveV1.DataPayment');
+            $paymentType = get('gfe_payment_type', 'GFE');
+            $ent_payment = $this->DataPayment->find()
+                ->where([
+                    'DataPayment.id_from' => $patient_id,
+                    'DataPayment.id_to' => 0,
+                    'DataPayment.type' => $paymentType,
+                    'DataPayment.service_uid' => '',
+                    'DataPayment.payment <>' => '',
+                    'DataPayment.prepaid' => 1,
+                    'DataPayment.comission_payed' => 1,
+                ])->first();
+            if (empty($ent_payment)) {
+                $this->message('You need to pay for the GFE.');
+                return;
             }
 
             if ($user['user_role'] == 'patient' || $user['user_role'] == 'clinic' || $user['user_role'] == 'injector' || $user['user_role'] == 'gfe+ci') {
@@ -17082,16 +17104,8 @@ class MainController extends AppPluginController {
                 'clinic_patient_id' => $patient_id,
                 'payment_method' => get('payment_method',''),
                 'language' => get('language','ENGLISH'),
-                // 'name' => $name,
-                // 'email' => $email,
-                // 'password' => hash_hmac('sha256', $passwd, Security::getSalt()),
-                // 'type' => $userType,
-                // 'active' => 1,
-                // 'confirm' => 1,
-                // 'confirm_code' => 0,
-                // 'deleted' => 0,
-                // 'createdby' => 0,
-                // 'modifiedby' => 0,
+                'state' => USER_STATE,
+                'course_type_id' => (int) get('course_type_id', 0),
 
             );
 
@@ -17100,7 +17114,15 @@ class MainController extends AppPluginController {
             if ($r) {
                 $array_save['meeting'] = $r['id'];
                 $array_save['meeting_pass'] = $r['password'];
-                $array_save['join_url'] = $r['join_url'];
+                $array_save['join_url'] = $r['join_url'] ?? '';
+                $this->set('meeting_id', $r['id']);
+                $this->set('meeting_pass', $r['password']);
+                if (!empty($r['join_url'])) {
+                    $this->set('meeting_url', $r['join_url']);
+                }
+                if (!empty($r['jwt'])) {
+                    $this->set('jwt', $r['jwt']);
+                }
 
             } else {
                 return;
@@ -17127,7 +17149,8 @@ class MainController extends AppPluginController {
                         }
                     }
                     
-                    $this->success();    
+                    $this->success();
+                    $this->set('use_qualiphy_gfe', false);
                     
 
                     //$str_quer = "UPDATE data_consultation SET `status` = 'CANCEL' WHERE patient_id = " . USER_ID . " AND (status = 'ONLINE' OR status = 'INIT') AND schedule_by = 0";
@@ -17294,6 +17317,159 @@ class MainController extends AppPluginController {
     }
 
     /**
+     * When false, GFE uses in-house examiners + Zoom (start_consultation_actual). Qualiphy code stays intact.
+     */
+    protected function useQualiphyGfe(): bool
+    {
+        $v = env('USE_QUALIPHY_GFE', 'true');
+        if (is_bool($v)) {
+            return $v;
+        }
+        $v = strtolower(trim((string) $v));
+
+        return !in_array($v, ['0', 'false', 'no', 'off'], true);
+    }
+
+    /**
+     * Resolves treatments param to cat_treatment id list for data_consultation.treatments.
+     *
+     * @return array{call_type: string, ot_exam_id: int}|null null when treatment not found
+     */
+    protected function resolveGfeCallTypeFromTreatments(string $string_treatments): ?array
+    {
+        $ot_exam_id = 0;
+        if ($string_treatments === 'neuro_filler') {
+            $call_type = '92,93';
+        } elseif ($string_treatments === 'iv_therapy') {
+            $call_type = '35';
+        } elseif ($string_treatments === 'neuro_iv') {
+            $call_type = '92,93,35';
+        } elseif ($string_treatments === 'other_treatments') {
+            $type = get('type', '');
+            $name_key = get('name_key', '');
+            if (empty($type) || $type !== 'OTHER_TREATMENTS' || empty($name_key)) {
+                return null;
+            }
+            $this->loadModel('SpaLiveV1.SysTreatmentsOt');
+            $other_treatment = $this->SysTreatmentsOt->find()
+                ->select(['CT.id', 'CT.qualiphy_exam_id'])
+                ->join([
+                    'CT' => ['table' => 'cat_treatments', 'type' => 'INNER', 'conditions' => 'SysTreatmentsOt.id = CT.other_treatment_id AND CT.deleted = 0'],
+                ])
+                ->where(['SysTreatmentsOt.deleted' => 0, 'SysTreatmentsOt.active' => 1, 'SysTreatmentsOt.name_key' => $name_key])
+                ->first();
+            if (empty($other_treatment)) {
+                return null;
+            }
+            $ot_exam_id = (int) $other_treatment['CT']['qualiphy_exam_id'];
+            $call_type = (string) $other_treatment['CT']['id'];
+            if ($ot_exam_id > 0) {
+                $this->loadModel('SpaLiveV1.CatTreatments');
+                $sameExamRows = $this->CatTreatments->find()
+                    ->select(['CatTreatments.id'])
+                    ->where([
+                        'CatTreatments.deleted' => 0,
+                        'CatTreatments.qualiphy_exam_id' => $ot_exam_id,
+                    ])
+                    ->order(['CatTreatments.id' => 'ASC'])
+                    ->all();
+                $treatmentIds = [];
+                foreach ($sameExamRows as $ctRow) {
+                    $treatmentIds[] = (int) $ctRow->id;
+                }
+                if (!empty($treatmentIds)) {
+                    $call_type = implode(',', $treatmentIds);
+                }
+            }
+
+            return ['call_type' => $call_type, 'ot_exam_id' => $ot_exam_id];
+        } elseif (preg_match('/^\d+(,\d+)*$/', $string_treatments)) {
+            $call_type = $string_treatments;
+        } else {
+            $call_type = '92,93';
+        }
+
+        return ['call_type' => $call_type, 'ot_exam_id' => $ot_exam_id];
+    }
+
+    /**
+     * Push NEW_PATIENT_WAITING_ROOM (or scheduled) to examiners in the patient's state.
+     */
+    public function notifyExaminersForWaitingRoomGfe(
+        array $user,
+        int $patient_id,
+        string $consultation_uid,
+        string $meeting_number,
+        string $meeting_pass,
+        int $schedule_by,
+        string $schedule_date
+    ): bool {
+        $this->loadModel('SpaLiveV1.SysUsers');
+        $arrUsers = $this->SysUsers->find()->where([
+            'SysUsers.type IN' => ['examiner', 'gfe+ci'],
+            'SysUsers.deleted' => 0,
+            'SysUsers.state' => $user['user_state'],
+            'SysUsers.login_status' => 'READY',
+            'SysUsers.active' => 1,
+        ])->all();
+
+        if (count($arrUsers) === 0) {
+            return false;
+        }
+
+        $arr_ids = [];
+        foreach ($arrUsers as $row) {
+            if ($row['id'] == USER_ID) {
+                continue;
+            }
+            if ($row['id'] == 18837) {
+                continue;
+            }
+            if ($row['id'] == 9982) {
+                continue;
+            }
+            $arr_ids[] = $row['id'];
+        }
+        $arr_ids[] = 9982;
+
+        $ent_patient = $this->SysUsers->find()->where(['SysUsers.id' => $patient_id, 'SysUsers.is_test' => 0])->first();
+        if (empty($ent_patient)) {
+            return false;
+        }
+
+        $constants = [
+            '[CNT/PatName]' => trim($ent_patient->name),
+            '[CNT/PatLastName]' => trim($ent_patient->lname),
+            '[CNT/PatPhone]' => preg_replace('~.*(\d{3})[^\d]{0,7}(\d{3})[^\d]{0,7}(\d{4}).*~', '($1)$2-$3', $ent_patient->phone),
+        ];
+        $dataNoti = [
+            'consultation_uid' => $consultation_uid,
+            'patient_name' => $ent_patient->name . ' ' . $ent_patient->lname,
+            'meeting_number' => $meeting_number,
+            'meeting_pass' => $meeting_pass,
+        ];
+
+        if ($schedule_by == 0) {
+            $this->notify_devices('NEW_PATIENT_WAITING_ROOM', $arr_ids, true, true, true, $dataNoti, '', $constants, true);
+        } else {
+            $dataNoti = [
+                'uid' => $consultation_uid,
+                'action' => 'open_schedule_room',
+            ];
+            $this->notify_devices('SCHEDULED_CONSULTATION', $arr_ids, true, true, true, $dataNoti, '', $constants, true);
+        }
+
+        if ($schedule_by > 0) {
+            $constants_not = [
+                '[CNT/ScheduleDate]' => date('m-d-Y h:i A', strtotime($schedule_date)),
+            ];
+            $this->notify_devices('SCHEDULED_CONSULTATION_CREATEDBY', [$schedule_by], false, true, true, [], '', $constants_not, false);
+        }
+
+        return true;
+    }
+
+    /**
      * Qualiphy join URLs can expire before patients join. If true, start_consultation refreshes the invite in place.
      * Set QUALIPHY_INVITE_MAX_AGE_DAYS=0 to disable (always reuse cached URL when not Zoom).
      */
@@ -17340,6 +17516,14 @@ class MainController extends AppPluginController {
             $this->set('session', false);
             return;
         }
+
+        if (!$this->useQualiphyGfe()) {
+            $this->set('gfe_provider', 'examiner_zoom');
+            $this->set('use_qualiphy_gfe', false);
+            return $this->start_consultation_actual();
+        }
+        $this->set('use_qualiphy_gfe', true);
+
         $ot_exam_id = 0;
         // if (API_KEY == '2fe548d5ae881ccfbe2be3f6237d7952') {
         //     $this->message('Go to app.myspalive.com to start get your GFE');
