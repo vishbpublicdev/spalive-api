@@ -17414,6 +17414,9 @@ class MainController extends AppPluginController {
         ])->all();
 
         if (count($arrUsers) === 0) {
+            $this->message('No examiners available.');
+            $this->success(false);
+
             return false;
         }
 
@@ -17645,6 +17648,19 @@ class MainController extends AppPluginController {
                 return;
             }
 
+            if (!$this->useQualiphyGfe()) {
+                $this->startConsultationWithExaminerZoom(
+                    $patient_id,
+                    $createdby,
+                    $schedule_by,
+                    $schedule_date,
+                    $call_type,
+                    $user
+                );
+
+                return;
+            }
+
             $consultation = $this->DataConsultation->find()->where(['DataConsultation.patient_id' => $patient_id, 'DataConsultation.deleted' => 0, 
                                                                     'DataConsultation.status' => 'INIT', 'DataConsultation.join_url <>' => ''])->first();
 
@@ -17656,6 +17672,8 @@ class MainController extends AppPluginController {
                     if (!$this->qualiphyInviteIsStale($consultation)) {
                         $this->set('meeting_url', $consultation->join_url);
                         $this->set('uid', $consultation->uid);
+                        $this->set('use_qualiphy_gfe', true);
+                        $this->set('gfe_provider', 'qualiphy');
                         $this->success();
                         return;
                     }
@@ -17683,6 +17701,8 @@ class MainController extends AppPluginController {
                     if ($this->DataConsultation->save($consultation)) {
                         $this->set('meeting_url', $rRefresh['meeting_url']);
                         $this->set('uid', $consultation->uid);
+                        $this->set('use_qualiphy_gfe', true);
+                        $this->set('gfe_provider', 'qualiphy');
                         $this->success();
                     }
                     return;
@@ -17733,6 +17753,8 @@ class MainController extends AppPluginController {
 
                     $this->set('meeting_url', $r['meeting_url']);
                     $this->set('uid', $consultation_uid);
+                    $this->set('use_qualiphy_gfe', true);
+                    $this->set('gfe_provider', 'qualiphy');
                     $this->success();
                 }
             }
@@ -18524,6 +18546,220 @@ class MainController extends AppPluginController {
             }
         }
         return false;
+    }
+
+    /**
+     * Parse ZOOM_API_KEY (client_id:client_secret) for Zoom OAuth.
+     *
+     * @return array{0: string, 1: string}|null
+     */
+    protected function getZoomOAuthClientCredentials(): ?array
+    {
+        $access = Configure::read('App.zoom_api_key');
+        if (empty($access)) {
+            $access = env('ZOOM_API_KEY', '');
+        }
+        if (empty($access) || strpos($access, ':') === false) {
+            return null;
+        }
+        $parts = explode(':', $access, 2);
+        if (empty($parts[0]) || empty($parts[1])) {
+            return null;
+        }
+        return [$parts[0], $parts[1]];
+    }
+
+    /**
+     * Redirect URI registered in Zoom Marketplace (must match exactly).
+     */
+    protected function getZoomOAuthRedirectUri(): string
+    {
+        $uri = trim((string)env('ZOOM_OAUTH_REDIRECT_URI', ''));
+        if ($uri !== '') {
+            return $uri;
+        }
+        $site = rtrim(trim((string)Configure::read('App.site_url')), '/');
+        if ($site === '') {
+            $site = rtrim(trim((string)env('SITE_URL', '')), '/');
+        }
+        $apiKey = trim((string)env('ZOOM_OAUTH_API_KEY', ''));
+        if ($site !== '' && $apiKey !== '') {
+            return $site . '/?key=' . rawurlencode($apiKey) . '&action=zoom-oauth-callback';
+        }
+        return '';
+    }
+
+    protected function getZoomOAuthScopes(): string
+    {
+        return trim((string)env(
+            'ZOOM_OAUTH_SCOPES',
+            'user:read meeting:write meeting:read'
+        ));
+    }
+
+    protected function buildZoomAuthorizeUrl(): ?string
+    {
+        $creds = $this->getZoomOAuthClientCredentials();
+        $redirectUri = $this->getZoomOAuthRedirectUri();
+        if ($creds === null || $redirectUri === '') {
+            return null;
+        }
+        $params = [
+            'response_type' => 'code',
+            'client_id' => $creds[0],
+            'redirect_uri' => $redirectUri,
+        ];
+        $scopes = $this->getZoomOAuthScopes();
+        if ($scopes !== '') {
+            $params['scope'] = $scopes;
+        }
+        return 'https://zoom.us/oauth/authorize?' . http_build_query($params);
+    }
+
+    protected function saveZoomOAuthTokens(array $tokenResponse): bool
+    {
+        if (empty($tokenResponse['refresh_token'])) {
+            return false;
+        }
+        $this->loadModel('SpaLiveV1.SysZoomTokens');
+        $array_save = [
+            'token' => $tokenResponse['access_token'] ?? null,
+            'refresh_token' => $tokenResponse['refresh_token'],
+            'expires_in' => $tokenResponse['expires_in'] ?? null,
+        ];
+        $t_entity = $this->SysZoomTokens->newEntity($array_save);
+        if ($t_entity->hasErrors()) {
+            return false;
+        }
+        return (bool)$this->SysZoomTokens->save($t_entity);
+    }
+
+    protected function exchangeZoomAuthorizationCode(string $code): ?array
+    {
+        $creds = $this->getZoomOAuthClientCredentials();
+        $redirectUri = $this->getZoomOAuthRedirectUri();
+        if ($creds === null || $redirectUri === '') {
+            return null;
+        }
+        $query = http_build_query([
+            'grant_type' => 'authorization_code',
+            'code' => $code,
+            'redirect_uri' => $redirectUri,
+        ]);
+        $curl = curl_init();
+        curl_setopt_array($curl, [
+            CURLOPT_URL => 'https://zoom.us/oauth/token',
+            CURLOPT_SSL_VERIFYPEER => true,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => $query,
+            CURLOPT_HTTPHEADER => [
+                'Authorization: Basic ' . base64_encode($creds[0] . ':' . $creds[1]),
+                'Content-Type: application/x-www-form-urlencoded',
+            ],
+        ]);
+        $response = curl_exec($curl);
+        $err = curl_error($curl);
+        curl_close($curl);
+        if ($err || $response === false) {
+            return null;
+        }
+        $arr = json_decode($response, true);
+        return is_array($arr) ? $arr : null;
+    }
+
+    protected function renderZoomOAuthHtml(string $title, string $body, bool $success): void
+    {
+        $color = $success ? '#1a7f4b' : '#b42318';
+        header('Content-Type: text/html; charset=utf-8');
+        echo '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' . htmlspecialchars($title) . '</title></head><body style="font-family:sans-serif;max-width:640px;margin:40px auto;padding:0 16px;">';
+        echo '<h1 style="color:' . $color . ';">' . htmlspecialchars($title) . '</h1>';
+        echo $body;
+        echo '</body></html>';
+        exit;
+    }
+
+    /**
+     * Returns redirect URI and authorize URL for Zoom Marketplace setup.
+     * Call: ?key=API_KEY&action=zoom-oauth-info
+     */
+    public function zoom_oauth_info()
+    {
+        $redirectUri = $this->getZoomOAuthRedirectUri();
+        $authorizeUrl = $this->buildZoomAuthorizeUrl();
+        if ($redirectUri === '' || $authorizeUrl === null) {
+            $this->message('Set ZOOM_API_KEY (client_id:secret), ZOOM_OAUTH_REDIRECT_URI or SITE_URL + ZOOM_OAUTH_API_KEY in config/.env');
+            return;
+        }
+        $this->set('redirect_uri', $redirectUri);
+        $this->set('authorize_url', $authorizeUrl);
+        $this->set('scopes', $this->getZoomOAuthScopes());
+        $this->set('start_url', $redirectUri);
+        $this->success();
+    }
+
+    /**
+     * Redirect browser to Zoom authorization (one-time token setup).
+     * Call: ?key=API_KEY&action=zoom-oauth-authorize
+     */
+    public function zoom_oauth_authorize()
+    {
+        $authorizeUrl = $this->buildZoomAuthorizeUrl();
+        if ($authorizeUrl === null) {
+            $this->renderZoomOAuthHtml(
+                'Zoom OAuth not configured',
+                '<p>Set <code>ZOOM_API_KEY</code> and <code>ZOOM_OAUTH_REDIRECT_URI</code> (or SITE_URL + ZOOM_OAUTH_API_KEY) in config/.env</p>',
+                false
+            );
+        }
+        header('Location: ' . $authorizeUrl);
+        exit;
+    }
+
+    /**
+     * Zoom OAuth callback — register this exact URL in Zoom Marketplace.
+     * Zoom redirects: ...&action=zoom-oauth-callback&code=...
+     */
+    public function zoom_oauth_callback()
+    {
+        $redirectUri = $this->getZoomOAuthRedirectUri();
+        if ($redirectUri === '') {
+            $this->renderZoomOAuthHtml(
+                'Zoom OAuth not configured',
+                '<p>Missing <code>ZOOM_OAUTH_REDIRECT_URI</code> in config/.env</p>',
+                false
+            );
+        }
+        if (!empty($_GET['error'])) {
+            $desc = htmlspecialchars((string)($_GET['error_description'] ?? $_GET['error']));
+            $this->renderZoomOAuthHtml('Zoom authorization failed', '<p>' . $desc . '</p>', false);
+        }
+        $code = trim((string)($_GET['code'] ?? ''));
+        if ($code === '') {
+            $this->renderZoomOAuthHtml(
+                'Missing authorization code',
+                '<p>Open <a href="' . htmlspecialchars($this->buildZoomAuthorizeUrl() ?? '#') . '">authorize URL</a> first.</p>',
+                false
+            );
+        }
+        $tokenResponse = $this->exchangeZoomAuthorizationCode($code);
+        if ($tokenResponse === null || !empty($tokenResponse['error'])) {
+            $err = htmlspecialchars((string)($tokenResponse['error'] ?? 'token exchange failed'));
+            $reason = htmlspecialchars((string)($tokenResponse['reason'] ?? ''));
+            $this->renderZoomOAuthHtml(
+                'Zoom token exchange failed',
+                '<p><strong>' . $err . '</strong></p><p>' . $reason . '</p><p>Ensure redirect URI in Zoom matches exactly:<br><code>' . htmlspecialchars($redirectUri) . '</code></p>',
+                false
+            );
+        }
+        if (!$this->saveZoomOAuthTokens($tokenResponse)) {
+            $this->renderZoomOAuthHtml('Could not save tokens', '<p>Check database table <code>sys_zoom_tokens</code>.</p>', false);
+        }
+        $this->renderZoomOAuthHtml(
+            'Zoom connected',
+            '<p>Refresh token saved to <code>sys_zoom_tokens</code>. You can close this tab and test <code>start-consultation</code>.</p>',
+            true
+        );
     }
 
     public function generateMeeting($schedule_date) {
