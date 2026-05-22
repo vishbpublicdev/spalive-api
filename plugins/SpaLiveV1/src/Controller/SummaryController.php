@@ -7773,11 +7773,17 @@ class SummaryController extends AppPluginController{
                         $service_type['training_id'] = $ent_data_training['CatTrainigs']['id'];
                         $service_type['data_training_id'] = $ent_data_training['id'];
                     } else {
+
+                        $arr_ot_options = [$service_type['name_key']];
+                        if ($service_type['name_key'] == 'NEUROTOXINS_BASIC') $arr_ot_options = ['NEUROTOXINS BASIC', 'NEUROTOXINS BASIC','BOTH NEUROTOXINS','BOTH_NEUROTOXINS'];
+                        if ($service_type['name_key'] == 'NEUROTOXINS_ADVANCED') $arr_ot_options = ['NEUROTOXINS_ADVANCED', 'NEUROTOXINS ADVANCED','BOTH NEUROTOXINS','BOTH_NEUROTOXINS'];
+
                         $this->loadModel('SpaLiveV1.DataCourses');
                         $ot_course_data = $this->DataCourses->find()->select(['DataCourses.id'])->join([
                             'CatCourses' => ['table' => 'cat_courses', 'type' => 'INNER', 'conditions' => 'CatCourses.id = DataCourses.course_id'],
-                        ])->where(['DataCourses.user_id' => USER_ID,'DataCourses.deleted' => 0,'DataCourses.status' => 'DONE','CatCourses.type' => $service_type['name_key']])->first();
-                         
+                        ])->where(['DataCourses.user_id' => USER_ID,'DataCourses.deleted' => 0,'DataCourses.status' => 'DONE','CatCourses.type IN' => $arr_ot_options])->first();
+
+                        
                         if (!empty($ot_course_data)) {
                             $service_type['data_course_id'] = $ot_course_data->id;
                         }
