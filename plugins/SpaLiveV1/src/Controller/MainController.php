@@ -13925,19 +13925,18 @@ class MainController extends AppPluginController {
                         }
 
 
-                        // Crear el nuevo elemento sin índices
-                        $newElement = [
-                            'id' => implode(',', $combinedIds),
-                            'parent_id' => 0,
-                            'name' => 'Neurotoxins & Fillers',
-                            'details' => 0,
-                            'haschild' => 0,
-                            'name_spanish' => 'Neurotoxinas y Rellenos',
-                            'selected' => false,
-                        ];
-
-                        // Agregar el nuevo elemento al inicio del arreglo
-                        array_unshift($result, $newElement);
+                        if (!empty($combinedIds)) {
+                            $newElement = [
+                                'id' => implode(',', $combinedIds),
+                                'parent_id' => 0,
+                                'name' => 'Neurotoxins & Fillers',
+                                'details' => 0,
+                                'haschild' => 0,
+                                'name_spanish' => 'Neurotoxinas y Rellenos',
+                                'selected' => false,
+                            ];
+                            array_unshift($result, $newElement);
+                        }
                     break;
                 case 'examiner' || 'gfe+ci':
                     $this->loadModel('SpaLiveV1.DataConsultation');
@@ -13958,6 +13957,24 @@ class MainController extends AppPluginController {
                     break;
 
             }
+        }
+        if (!empty($result)) {
+            $result = array_values(array_filter($result, function ($row) {
+                return trim((string)($row['name'] ?? '')) !== '';
+            }));
+            // Start-consultation UI only shows parent_id=0; drop empty duplicate parents.
+            $seenParentLabels = [];
+            $result = array_values(array_filter($result, function ($row) use (&$seenParentLabels) {
+                if ((int)($row['parent_id'] ?? 0) !== 0) {
+                    return true;
+                }
+                $label = strtolower(trim((string)($row['name'] ?? '')));
+                if ($label === '' || isset($seenParentLabels[$label])) {
+                    return false;
+                }
+                $seenParentLabels[$label] = true;
+                return true;
+            }));
         }
         $this->set('data', $result);
         
@@ -17111,12 +17128,12 @@ class MainController extends AppPluginController {
 
             $r = $this->generateMeeting($schedule_date);
 
-            if ($r) {
+            if (!empty($r['id'])) {
                 $array_save['meeting'] = $r['id'];
-                $array_save['meeting_pass'] = $r['password'];
+                $array_save['meeting_pass'] = $r['password'] ?? '';
                 $array_save['join_url'] = $r['join_url'] ?? '';
                 $this->set('meeting_id', $r['id']);
-                $this->set('meeting_pass', $r['password']);
+                $this->set('meeting_pass', $array_save['meeting_pass']);
                 if (!empty($r['join_url'])) {
                     $this->set('meeting_url', $r['join_url']);
                 }
@@ -17125,6 +17142,11 @@ class MainController extends AppPluginController {
                 }
 
             } else {
+                if (is_array($r) && !empty($r['message'])) {
+                    $this->message($r['message']);
+                } else {
+                    $this->message('Unable to create Zoom meeting.');
+                }
                 return;
             }
 
@@ -17151,7 +17173,7 @@ class MainController extends AppPluginController {
                     
                     $this->success();
                     $this->set('use_qualiphy_gfe', false);
-                    
+                    $this->set('gfe_provider', 'examiner_zoom');
 
                     //$str_quer = "UPDATE data_consultation SET `status` = 'CANCEL' WHERE patient_id = " . USER_ID . " AND (status = 'ONLINE' OR status = 'INIT') AND schedule_by = 0";
                     // $this->set('schedule_date', $str_quer); return;
@@ -17317,7 +17339,7 @@ class MainController extends AppPluginController {
     }
 
     /**
-     * When false, GFE uses in-house examiners + Zoom (start_consultation_actual). Qualiphy code stays intact.
+     * When false, GFE uses in-house examiners + Zoom (start_consultation Zoom branch). Qualiphy code stays intact.
      */
     protected function useQualiphyGfe(): bool
     {
@@ -17499,6 +17521,134 @@ class MainController extends AppPluginController {
         return $ts < (time() - $maxDays * 86400);
     }
 
+    /**
+     * Start GFE with in-house examiners + Zoom. Does not require pre-exam answers JSON
+     * (unlike start_consultation_actual, used when patient completes the questionnaire first).
+     */
+    protected function startConsultationWithExaminerZoom(
+        $patient_id,
+        $createdby,
+        $schedule_by,
+        string $schedule_date,
+        string $call_type,
+        array $user
+    ): void {
+        $patient_id = (int) $patient_id;
+        $createdby = (int) $createdby;
+        $schedule_by = (int) $schedule_by;
+        $this->set('gfe_provider', 'examiner_zoom');
+        $this->set('use_qualiphy_gfe', false);
+
+        if (in_array($user['user_role'], ['clinic', 'injector', 'gfe+ci'], true)) {
+            $this->loadModel('SpaLiveV1.SysUsers');
+            $_patient_id = $this->SysUsers->uid_to_id(get('patient_uid', ''));
+            if ($_patient_id > 0) {
+                $patient_id = $_patient_id;
+            }
+        }
+
+        $consultation = $this->DataConsultation->find()
+            ->where([
+                'DataConsultation.patient_id' => $patient_id,
+                'DataConsultation.deleted' => 0,
+                'DataConsultation.status' => 'INIT',
+                'DataConsultation.join_url <>' => '',
+            ])
+            ->first();
+
+        if (!empty($consultation) && strpos($consultation->join_url, 'zoom.us') !== false) {
+            $this->set('meeting_url', $consultation->join_url);
+            $this->set('meeting_id', $consultation->meeting);
+            $this->set('meeting_pass', $consultation->meeting_pass);
+            $this->set('uid', $consultation->uid);
+            $this->success();
+
+            return;
+        }
+
+        $consultation_uid = Text::uuid();
+        $array_save = [
+            'uid' => $consultation_uid,
+            'patient_id' => $patient_id,
+            'assistance_id' => 0,
+            'treatments' => $call_type,
+            'payment' => '',
+            'meeting' => '',
+            'meeting_pass' => '',
+            'schedule_date' => $schedule_date,
+            'status' => 'INIT',
+            'schedule_by' => $schedule_by,
+            'deleted' => 0,
+            'participants' => 0,
+            'createdby' => $createdby,
+            'clinic_patient_id' => $patient_id,
+            'payment_method' => get('payment_method', ''),
+            'language' => get('language', 'ENGLISH'),
+            'state' => USER_STATE,
+            'course_type_id' => (int) get('course_type_id', 0),
+        ];
+
+        $r = $this->generateMeeting($schedule_date);
+        if (empty($r) || empty($r['id'])) {
+            $this->message('Unable to create Zoom meeting.');
+
+            return;
+        }
+
+        $array_save['meeting'] = $r['id'];
+        $array_save['meeting_pass'] = $r['password'] ?? '';
+        $array_save['join_url'] = $r['join_url'] ?? '';
+
+        $c_entity = $this->DataConsultation->newEntity($array_save);
+        if ($c_entity->hasErrors() || !$this->DataConsultation->save($c_entity)) {
+            $this->message('Unable to save consultation.');
+
+            return;
+        }
+
+        if ($user['user_role'] === 'clinic') {
+            $this->loadModel('SpaLiveV1.DataPatientConsult');
+            $ent_cons_pat = $this->DataPatientConsult->newEntity([
+                'consult_id' => $c_entity->id,
+                'patient_clin_id' => $patient_id,
+            ]);
+            if (!$ent_cons_pat->hasErrors()) {
+                $this->DataPatientConsult->save($ent_cons_pat);
+            }
+        }
+
+        $this->set('meeting_id', $r['id']);
+        $this->set('meeting_pass', $r['password'] ?? '');
+        if (!empty($r['join_url'])) {
+            $this->set('meeting_url', $r['join_url']);
+        }
+        if (!empty($r['jwt'])) {
+            $this->set('jwt', $r['jwt']);
+        }
+        $this->set('uid', $consultation_uid);
+        $this->success();
+
+        $this->notifyExaminersForWaitingRoomGfe(
+            $user,
+            $patient_id,
+            $consultation_uid,
+            (string) $array_save['meeting'],
+            (string) $array_save['meeting_pass'],
+            $schedule_by,
+            $schedule_date
+        );
+
+        $this->loadModel('SpaLiveV1.SysUsers');
+        $ent_patient = $this->SysUsers->find()
+            ->where(['SysUsers.id' => $patient_id, 'SysUsers.is_test' => 0])
+            ->first();
+        if (!empty($ent_patient)) {
+            $this->loadModel('SpaLiveV1.SysUserAdmin');
+            $md_id = $this->SysUserAdmin->getAssignedDoctor();
+            $this->SysUsers->updateAll(['md_id' => $md_id], ['SysUsers.id' => $ent_patient->id]);
+        }
+    }
+
     public function start_consultation(){
         $this->loadModel('SpaLiveV1.DataConsultation'); 
         $this->loadModel('SpaLiveV1.DataPayment'); 
@@ -17520,11 +17670,21 @@ class MainController extends AppPluginController {
             return;
         }
 
+        // Examiner + Zoom: require pre-exam questionnaire answers (start_consultation_actual).
         if (!$this->useQualiphyGfe()) {
             $this->set('gfe_provider', 'examiner_zoom');
             $this->set('use_qualiphy_gfe', false);
-            return $this->start_consultation_actual();
+            $consultation_uid = get('consultation_uid', '');
+            $string_answers = get('answers', '');
+            $arr_answers = $string_answers !== '' ? json_decode($string_answers, true) : null;
+            if (!empty($consultation_uid) || !empty($arr_answers)) {
+                return $this->start_consultation_actual();
+            }
+            $this->message('Complete the medical questionnaire before starting the exam.');
+
+            return;
         }
+
         $this->set('use_qualiphy_gfe', true);
 
         $ot_exam_id = 0;
@@ -17645,19 +17805,6 @@ class MainController extends AppPluginController {
             
             if(empty($ent_payment)){
                 $this->message('You need to pay for the GFE.');
-                return;
-            }
-
-            if (!$this->useQualiphyGfe()) {
-                $this->startConsultationWithExaminerZoom(
-                    $patient_id,
-                    $createdby,
-                    $schedule_by,
-                    $schedule_date,
-                    $call_type,
-                    $user
-                );
-
                 return;
             }
 
@@ -18589,12 +18736,53 @@ class MainController extends AppPluginController {
         return '';
     }
 
-    protected function getZoomOAuthScopes(): string
+    /**
+     * Zoom rejects ?scope= on /oauth/authorize (even valid scope names → "Invalid scope").
+     * Scopes must be configured only in Zoom Marketplace for the app.
+     *
+     * @return null always (never send scope on authorize URL)
+     */
+    protected function getZoomOAuthScopes(): ?string
     {
-        return trim((string)env(
-            'ZOOM_OAUTH_SCOPES',
-            'user:read meeting:write meeting:read'
-        ));
+        $raw = env('ZOOM_OAUTH_SCOPES');
+        if ($raw !== false && $raw !== null && trim((string)$raw) !== '') {
+            $this->log(__LINE__ . ' ZOOM_OAUTH_SCOPES is set but ignored; remove it from .env to avoid confusion.');
+        }
+        return null;
+    }
+
+    /**
+     * Scope guidance for zoom-oauth-info (depends on app management type in Marketplace).
+     *
+     * @return array<string, mixed>
+     */
+    protected function getZoomGfeScopeGuidance(): array
+    {
+        return [
+            'user_managed_app' => [
+                'description' => 'Your General app 493 (user-managed): OAuth + GFE meetings on the authorized user.',
+                'marketplace_scopes' => [
+                    'user:read:user',
+                    'meeting:write:meeting',
+                    'meeting:read:meeting',
+                ],
+            ],
+            'admin_managed_app_for_full_pool' => [
+                'description' => 'Separate admin-managed General app or Server-to-Server app for pool + custCreate.',
+                'marketplace_scopes' => [
+                    'user:read:user',
+                    'user:write:user:admin',
+                    'meeting:write:meeting:admin',
+                    'meeting:read:meeting',
+                ],
+                'classic_alternatives' => [
+                    'user:read:admin',
+                    'user:write:admin',
+                    'meeting:write:admin',
+                ],
+            ],
+            'note' => 'user:write:user and meeting:write:meeting:admin do not exist. Admin scopes only appear on admin-managed or S2S apps.',
+        ];
     }
 
     protected function buildZoomAuthorizeUrl(): ?string
@@ -18609,10 +18797,6 @@ class MainController extends AppPluginController {
             'client_id' => $creds[0],
             'redirect_uri' => $redirectUri,
         ];
-        $scopes = $this->getZoomOAuthScopes();
-        if ($scopes !== '') {
-            $params['scope'] = $scopes;
-        }
         return 'https://zoom.us/oauth/authorize?' . http_build_query($params);
     }
 
@@ -18691,9 +18875,17 @@ class MainController extends AppPluginController {
             $this->message('Set ZOOM_API_KEY (client_id:secret), ZOOM_OAUTH_REDIRECT_URI or SITE_URL + ZOOM_OAUTH_API_KEY in config/.env');
             return;
         }
+        $creds = $this->getZoomOAuthClientCredentials();
         $this->set('redirect_uri', $redirectUri);
         $this->set('authorize_url', $authorizeUrl);
-        $this->set('scopes', $this->getZoomOAuthScopes());
+        $this->set('scopes', null);
+        $this->set('scopes_source', 'marketplace_only_never_in_authorize_url');
+        $this->set('client_id', $creds !== null ? $creds[0] : '');
+        $this->set(
+            'zoom_oauth_note',
+            'Authorize URL must NOT include scope=. Match client_id to app 493 in Marketplace. redirect_uri must match OAuth Redirect URL exactly.'
+        );
+        $this->set('scope_guidance', $this->getZoomGfeScopeGuidance());
         $this->set('start_url', $redirectUri);
         $this->success();
     }
@@ -18788,119 +18980,34 @@ class MainController extends AppPluginController {
             }';
 
 
-            //$u_email = $this->generateZoomUser($zoom_token);
-            /*if (!$u_email) {
+            $arr_response = $this->createZoomGfeMeeting($zoom_token, $meeting_settings);
+            if (!$arr_response) {
                 return false;
-            }*/
-            if(env('IS_DEV', false)){
-                $str_url = "https://api.zoom.us/v2/users/wl.eg@gmail.com/meetings";                
-            }else{
-                $account = array(
-                'dev@myspalive.com',
-                'amelia@ruiz.com',
-                'Anaya@allen.com',
-                'andy@morgan.com',
-                'anyatjoyprincesspeach96@gmail.com',
-                'carlos@advantedigital.com',
-                'carlos@test.com',
-                'caroadams@tester.com',
-                'drake@tester.com',
-                'GFE@CALL.com',
-                'ariella@edwards.com',
-                'ashley@davidson.com',
-                'briella@young.com',
-                'Catalina@myers.com',
-                'elise@larson.com',
-                'eliza@norris.com',
-                'eralit@gmail.com',
-                'faithross@gmail.com',
-                'fer@fibhsiudh.com',
-                'gabriellemccarty@gmail.com',
-                'Haliewilkinson@gmail.com',
-                'Hannah@collins.com',
-                'hector@salamanca.com',
-                'isaacmanuel@vargas.com',
-                'jade@reed.com',
-                'john@last.com',
-                'julia@kim.com',
-                'lily@lewis.com',
-                'maria@salazar.com',
-                'madaleinewaters@gmail.com'
-                );
-                $myArray = [0,1, 2, 3, 4, 5, 6, 7, 8, 9, 10,11, 12, 13, 14, 15, 16, 17, 18, 19, 20,21, 22, 23, 24, 25, 26, 27, 28, 29];
-                $randomIndex = array_rand($myArray); // Generate a random index
-                $u_email = $account[$randomIndex];
-                $this->log(__LINE__ . ' ' . json_encode($u_email));
-                $this->set('u_email',$u_email);
-                $str_url = "https://api.zoom.us/v2/users/" . $u_email . "/meetings";
             }
-             
-            // $str_url = "https://api.zoom.us/v2/users/me/meetings";
 
-            
-            $curl = curl_init();
+            $this->set('meeting_id', $arr_response['id']);
+            $this->set('meeting_pass', isset($arr_response['password']) ? $arr_response['password'] : '');
 
-            curl_setopt_array($curl, array(
-              CURLOPT_URL => $str_url,
-              // CURLOPT_URL => "https://api.zoom.us/v2/users/khanzab@gmail.com/meetings",
-              CURLOPT_RETURNTRANSFER => true,
-              CURLOPT_ENCODING => "",
-              CURLOPT_MAXREDIRS => 10,
-              CURLOPT_TIMEOUT => 30,
-              CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
-              CURLOPT_CUSTOMREQUEST => "POST",
-              CURLOPT_POSTFIELDS => $meeting_settings,
-              CURLOPT_HTTPHEADER => array(
-                "authorization: Bearer " . $zoom_token,
-                "content-type: application/json"
-              ),
-            ));
+            $iat = time();
+            $exp = $iat + 60 * 60;
+            $sdkKey = env('ZOOM_SDK_KEY', '');
+            $sdkSecret = env('ZOOM_SDK_SECRET', '');
 
-            $response = curl_exec($curl);
-            $err = curl_error($curl);
+            $payload = [
+                'sdkKey' => $sdkKey,
+                'mn' => isset($arr_response['id']) ? $arr_response['id'] : '',
+                'role' => 0,
+                'iat' => $iat,
+                'exp' => $exp,
+                'appKey' => $sdkKey,
+                'tokenExp' => $exp,
+            ];
 
-            curl_close($curl);
-            
-            if (!$err) {
-              $arr_response = json_decode($response,true);  
-              // pr($arr_response); exit;
-              if ($arr_response) {
-                  $this->set('meeting_id', isset($arr_response['id'])? $arr_response['id']:'');
-                  $this->set('meeting_pass', isset($arr_response['password'])? $arr_response['password']:'');
+            $jwt = JWT::encode($payload, $sdkSecret, 'HS256');
+            $this->set('jwt', $jwt);
+            $arr_response['jwt'] = $jwt;
 
-
-                //JWT for Flutter Web
-                $iat = time();
-                $exp = $iat + 60 * 60;
-                $sdkKey = env('ZOOM_SDK_KEY','');
-                $sdkSecret = env('ZOOM_SDK_SECRET','');
-
-                /*$headers = [
-                    'Cross-Origin-Opener-Policy' => 'same-origin',
-                    'Cross-Origin-Embedder-Policy' => 'require-corp',
-                ];*/
-
-                $payload = [
-                    'sdkKey' => $sdkKey,
-                    'mn'=> isset($arr_response['id'])? $arr_response['id']:'', //meet number
-                    'role' => 0,
-                    'iat' =>  $iat,
-                    'exp' =>  $exp,
-                    'appKey' =>  $sdkKey,
-                    'tokenExp' =>  $exp
-                ];
-
-                /*$zak = $this->generateZakToken($zoom_token,$u_email);
-                $arr_response['zak'] = $zak;*/
-
-                $jwt = JWT::encode($payload, $sdkSecret, 'HS256'/*, null, $headers*/);
-                $this->set('jwt', $jwt);
-                $arr_response['jwt'] = $jwt;
-
-                return $arr_response;
-              }
-            }
-            return false;
+            return $arr_response;
         }
 
     }
@@ -18943,11 +19050,235 @@ class MainController extends AppPluginController {
         return false;
     }
 
+    /**
+     * Reusable Zoom host emails under the org account (same logic dev and prod).
+     *
+     * @return string[]
+     */
+    private function getZoomGfeMeetingHostPool(): array
+    {
+        return [
+            'dev@myspalive.com',
+            'amelia@ruiz.com',
+            'Anaya@allen.com',
+            'andy@morgan.com',
+            'anyatjoyprincesspeach96@gmail.com',
+            'carlos@advantedigital.com',
+            'carlos@test.com',
+            'caroadams@tester.com',
+            'drake@tester.com',
+            'GFE@CALL.com',
+            'ariella@edwards.com',
+            'ashley@davidson.com',
+            'briella@young.com',
+            'Catalina@myers.com',
+            'elise@larson.com',
+            'eliza@norris.com',
+            'eralit@gmail.com',
+            'faithross@gmail.com',
+            'fer@fibhsiudh.com',
+            'gabriellemccarty@gmail.com',
+            'Haliewilkinson@gmail.com',
+            'Hannah@collins.com',
+            'hector@salamanca.com',
+            'isaacmanuel@vargas.com',
+            'jade@reed.com',
+            'john@last.com',
+            'julia@kim.com',
+            'lily@lewis.com',
+            'maria@salazar.com',
+            'madaleinewaters@gmail.com',
+        ];
+    }
+
+    private function useZoomGfeHostPool(): bool
+    {
+        return filter_var(env('ZOOM_GFE_USE_POOL', true), FILTER_VALIDATE_BOOLEAN);
+    }
+
+    private function allowZoomPoolUserCreate(): bool
+    {
+        return filter_var(env('ZOOM_POOL_CREATE_USERS', false), FILTER_VALIDATE_BOOLEAN);
+    }
+
+    /**
+     * Create GFE meeting: try pool host when enabled, then fallback to OAuth user (/users/me).
+     *
+     * @return array|false Zoom meeting payload including id
+     */
+    private function createZoomGfeMeeting(string $zoom_token, string $meeting_settings)
+    {
+        if ($this->useZoomGfeHostPool()) {
+            $poolEmail = $this->pickZoomGfePoolHost($zoom_token);
+            if ($poolEmail !== null) {
+                $poolUrl = 'https://api.zoom.us/v2/users/' . rawurlencode($poolEmail) . '/meetings';
+                $poolResponse = $this->postZoomMeeting($zoom_token, $meeting_settings, $poolUrl);
+                if ($poolResponse !== false) {
+                    $this->log(__LINE__ . ' Zoom GFE host (pool): ' . json_encode($poolEmail));
+                    $this->set('u_email', $poolEmail);
+                    $this->set('zoom_gfe_host_mode', 'pool');
+                    $poolResponse['zoom_gfe_host_mode'] = 'pool';
+                    return $poolResponse;
+                }
+                $this->log(__LINE__ . ' Zoom GFE pool host failed, fallback to /users/me');
+            }
+        }
+
+        $meResponse = $this->postZoomMeeting(
+            $zoom_token,
+            $meeting_settings,
+            'https://api.zoom.us/v2/users/me/meetings'
+        );
+        if ($meResponse !== false) {
+            $this->set('zoom_gfe_host_mode', 'oauth_user');
+            $meResponse['zoom_gfe_host_mode'] = 'oauth_user';
+        }
+        return $meResponse;
+    }
+
+    /**
+     * @return array|false
+     */
+    private function postZoomMeeting(string $zoom_token, string $meetingSettings, string $url)
+    {
+        $curl = curl_init();
+        curl_setopt_array($curl, [
+            CURLOPT_URL => $url,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_ENCODING => '',
+            CURLOPT_MAXREDIRS => 10,
+            CURLOPT_TIMEOUT => 30,
+            CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
+            CURLOPT_CUSTOMREQUEST => 'POST',
+            CURLOPT_POSTFIELDS => $meetingSettings,
+            CURLOPT_HTTPHEADER => [
+                'authorization: Bearer ' . $zoom_token,
+                'content-type: application/json',
+            ],
+        ]);
+
+        $response = curl_exec($curl);
+        $err = curl_error($curl);
+        curl_close($curl);
+
+        if ($err) {
+            $this->log(__LINE__ . ' postZoomMeeting curl: ' . $err);
+            return false;
+        }
+
+        $arrResponse = json_decode($response, true);
+        if (!is_array($arrResponse) || empty($arrResponse['id'])) {
+            $this->log(__LINE__ . ' postZoomMeeting: ' . json_encode($arrResponse));
+            if (!empty($arrResponse['message'])) {
+                $this->message($arrResponse['message']);
+            }
+            return false;
+        }
+
+        return $arrResponse;
+    }
+
+    /**
+     * Pick a pool email that already exists in the Zoom account (user:read:user).
+     */
+    private function pickZoomGfePoolHost(string $zoom_token): ?string
+    {
+        $pool = $this->getZoomGfeMeetingHostPool();
+        if (empty($pool)) {
+            return null;
+        }
+        $attempts = min(5, count($pool));
+        $tried = [];
+        for ($i = 0; $i < $attempts; $i++) {
+            $email = $pool[array_rand($pool)];
+            if (isset($tried[$email])) {
+                continue;
+            }
+            $tried[$email] = true;
+            if ($this->zoomPoolUserIsAvailable($zoom_token, $email)) {
+                return $email;
+            }
+        }
+        return null;
+    }
+
+    private function zoomPoolUserIsAvailable(string $zoom_token, string $email): bool
+    {
+        $user = $this->get_zoom_user($zoom_token, $email);
+        if (is_array($user) && !empty($user['id'])) {
+            return true;
+        }
+        if ($this->allowZoomPoolUserCreate()) {
+            return $this->createZoomPoolUser($zoom_token, $email);
+        }
+        return false;
+    }
+
+    /**
+     * Create a basic (custCreate) user under the Zoom account for pool hosting.
+     */
+    private function createZoomPoolUser(string $zoom_token, string $email): bool
+    {
+        if ($zoom_token === '') {
+            return false;
+        }
+        $localPart = explode('@', $email)[0];
+        $firstName = preg_replace('/[^a-zA-Z0-9 ]/', '', $localPart);
+        if ($firstName === '') {
+            $firstName = 'GFE';
+        }
+        $userSettings = json_encode([
+            'action' => 'custCreate',
+            'user_info' => [
+                'email' => $email,
+                'type' => 1,
+                'first_name' => $firstName,
+                'last_name' => 'Host',
+            ],
+        ]);
+
+        $curl = curl_init();
+        curl_setopt_array($curl, [
+            CURLOPT_URL => 'https://api.zoom.us/v2/users/',
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_ENCODING => '',
+            CURLOPT_MAXREDIRS => 10,
+            CURLOPT_TIMEOUT => 30,
+            CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
+            CURLOPT_CUSTOMREQUEST => 'POST',
+            CURLOPT_POSTFIELDS => $userSettings,
+            CURLOPT_HTTPHEADER => [
+                'authorization: Bearer ' . $zoom_token,
+                'content-type: application/json',
+            ],
+        ]);
+
+        $response = curl_exec($curl);
+        $err = curl_error($curl);
+        curl_close($curl);
+
+        if ($err) {
+            $this->log(__LINE__ . ' createZoomPoolUser curl: ' . $err);
+            return false;
+        }
+
+        $decoded = json_decode($response, true);
+        if (!empty($decoded['id'])) {
+            return true;
+        }
+        // 1005 = user already exists
+        if (!empty($decoded['code']) && (int)$decoded['code'] === 1005) {
+            return true;
+        }
+        $this->log(__LINE__ . ' createZoomPoolUser: ' . json_encode($decoded));
+        return false;
+    }
+
     private function get_zoom_user($zoom_token,$u_email){
         $curl = curl_init();
 
         curl_setopt_array($curl, array(
-            CURLOPT_URL => "https://api.zoom.us/v2/users/".$u_email,
+            CURLOPT_URL => "https://api.zoom.us/v2/users/".rawurlencode($u_email),
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_ENCODING => "",
             CURLOPT_MAXREDIRS => 10,
