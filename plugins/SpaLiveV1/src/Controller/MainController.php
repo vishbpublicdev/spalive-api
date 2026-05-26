@@ -17132,14 +17132,6 @@ class MainController extends AppPluginController {
                 $array_save['meeting'] = $r['id'];
                 $array_save['meeting_pass'] = $r['password'] ?? '';
                 $array_save['join_url'] = $r['join_url'] ?? '';
-                $this->set('meeting_id', $r['id']);
-                $this->set('meeting_pass', $array_save['meeting_pass']);
-                if (!empty($r['join_url'])) {
-                    $this->set('meeting_url', $r['join_url']);
-                }
-                if (!empty($r['jwt'])) {
-                    $this->set('jwt', $r['jwt']);
-                }
 
             } else {
                 if (is_array($r) && !empty($r['message'])) {
@@ -17170,10 +17162,18 @@ class MainController extends AppPluginController {
                             $this->DataConsultationAnswers->save($cq_entity);
                         }
                     }
-                    
-                    $this->success();
+
+                    $this->set('meeting_id', $r['id']);
+                    $this->set('meeting_pass', $array_save['meeting_pass']);
+                    if (!empty($array_save['join_url'])) {
+                        $this->set('meeting_url', $array_save['join_url']);
+                    }
+                    if (!empty($r['jwt'])) {
+                        $this->set('jwt', $r['jwt']);
+                    }
                     $this->set('use_qualiphy_gfe', false);
                     $this->set('gfe_provider', 'examiner_zoom');
+                    $this->success();
 
                     //$str_quer = "UPDATE data_consultation SET `status` = 'CANCEL' WHERE patient_id = " . USER_ID . " AND (status = 'ONLINE' OR status = 'INIT') AND schedule_by = 0";
                     // $this->set('schedule_date', $str_quer); return;
@@ -17521,134 +17521,6 @@ class MainController extends AppPluginController {
         return $ts < (time() - $maxDays * 86400);
     }
 
-    /**
-     * Start GFE with in-house examiners + Zoom. Does not require pre-exam answers JSON
-     * (unlike start_consultation_actual, used when patient completes the questionnaire first).
-     */
-    protected function startConsultationWithExaminerZoom(
-        $patient_id,
-        $createdby,
-        $schedule_by,
-        string $schedule_date,
-        string $call_type,
-        array $user
-    ): void {
-        $patient_id = (int) $patient_id;
-        $createdby = (int) $createdby;
-        $schedule_by = (int) $schedule_by;
-        $this->set('gfe_provider', 'examiner_zoom');
-        $this->set('use_qualiphy_gfe', false);
-
-        if (in_array($user['user_role'], ['clinic', 'injector', 'gfe+ci'], true)) {
-            $this->loadModel('SpaLiveV1.SysUsers');
-            $_patient_id = $this->SysUsers->uid_to_id(get('patient_uid', ''));
-            if ($_patient_id > 0) {
-                $patient_id = $_patient_id;
-            }
-        }
-
-        $consultation = $this->DataConsultation->find()
-            ->where([
-                'DataConsultation.patient_id' => $patient_id,
-                'DataConsultation.deleted' => 0,
-                'DataConsultation.status' => 'INIT',
-                'DataConsultation.join_url <>' => '',
-            ])
-            ->first();
-
-        if (!empty($consultation) && strpos($consultation->join_url, 'zoom.us') !== false) {
-            $this->set('meeting_url', $consultation->join_url);
-            $this->set('meeting_id', $consultation->meeting);
-            $this->set('meeting_pass', $consultation->meeting_pass);
-            $this->set('uid', $consultation->uid);
-            $this->success();
-
-            return;
-        }
-
-        $consultation_uid = Text::uuid();
-        $array_save = [
-            'uid' => $consultation_uid,
-            'patient_id' => $patient_id,
-            'assistance_id' => 0,
-            'treatments' => $call_type,
-            'payment' => '',
-            'meeting' => '',
-            'meeting_pass' => '',
-            'schedule_date' => $schedule_date,
-            'status' => 'INIT',
-            'schedule_by' => $schedule_by,
-            'deleted' => 0,
-            'participants' => 0,
-            'createdby' => $createdby,
-            'clinic_patient_id' => $patient_id,
-            'payment_method' => get('payment_method', ''),
-            'language' => get('language', 'ENGLISH'),
-            'state' => USER_STATE,
-            'course_type_id' => (int) get('course_type_id', 0),
-        ];
-
-        $r = $this->generateMeeting($schedule_date);
-        if (empty($r) || empty($r['id'])) {
-            $this->message('Unable to create Zoom meeting.');
-
-            return;
-        }
-
-        $array_save['meeting'] = $r['id'];
-        $array_save['meeting_pass'] = $r['password'] ?? '';
-        $array_save['join_url'] = $r['join_url'] ?? '';
-
-        $c_entity = $this->DataConsultation->newEntity($array_save);
-        if ($c_entity->hasErrors() || !$this->DataConsultation->save($c_entity)) {
-            $this->message('Unable to save consultation.');
-
-            return;
-        }
-
-        if ($user['user_role'] === 'clinic') {
-            $this->loadModel('SpaLiveV1.DataPatientConsult');
-            $ent_cons_pat = $this->DataPatientConsult->newEntity([
-                'consult_id' => $c_entity->id,
-                'patient_clin_id' => $patient_id,
-            ]);
-            if (!$ent_cons_pat->hasErrors()) {
-                $this->DataPatientConsult->save($ent_cons_pat);
-            }
-        }
-
-        $this->set('meeting_id', $r['id']);
-        $this->set('meeting_pass', $r['password'] ?? '');
-        if (!empty($r['join_url'])) {
-            $this->set('meeting_url', $r['join_url']);
-        }
-        if (!empty($r['jwt'])) {
-            $this->set('jwt', $r['jwt']);
-        }
-        $this->set('uid', $consultation_uid);
-        $this->success();
-
-        $this->notifyExaminersForWaitingRoomGfe(
-            $user,
-            $patient_id,
-            $consultation_uid,
-            (string) $array_save['meeting'],
-            (string) $array_save['meeting_pass'],
-            $schedule_by,
-            $schedule_date
-        );
-
-        $this->loadModel('SpaLiveV1.SysUsers');
-        $ent_patient = $this->SysUsers->find()
-            ->where(['SysUsers.id' => $patient_id, 'SysUsers.is_test' => 0])
-            ->first();
-        if (!empty($ent_patient)) {
-            $this->loadModel('SpaLiveV1.SysUserAdmin');
-            $md_id = $this->SysUserAdmin->getAssignedDoctor();
-            $this->SysUsers->updateAll(['md_id' => $md_id], ['SysUsers.id' => $ent_patient->id]);
-        }
-    }
-
     public function start_consultation(){
         $this->loadModel('SpaLiveV1.DataConsultation'); 
         $this->loadModel('SpaLiveV1.DataPayment'); 
@@ -17670,22 +17542,23 @@ class MainController extends AppPluginController {
             return;
         }
 
-        // Examiner + Zoom: require pre-exam questionnaire answers (start_consultation_actual).
-        if (!$this->useQualiphyGfe()) {
-            $this->set('gfe_provider', 'examiner_zoom');
-            $this->set('use_qualiphy_gfe', false);
+        $useQualiphy = $this->useQualiphyGfe();
+        $this->set('use_qualiphy_gfe', $useQualiphy);
+        $this->set('gfe_provider', $useQualiphy ? 'qualiphy' : 'examiner_zoom');
+
+        if (!$useQualiphy) {
             $consultation_uid = get('consultation_uid', '');
-            $string_answers = get('answers', '');
-            $arr_answers = $string_answers !== '' ? json_decode($string_answers, true) : null;
-            if (!empty($consultation_uid) || !empty($arr_answers)) {
-                return $this->start_consultation_actual();
+            $arr_answers = json_decode((string) get('answers', ''), true);
+            if (empty($consultation_uid) && empty($arr_answers)) {
+                $this->success(false);
+                $this->message('Complete the medical questionnaire before starting the exam.');
+
+                return;
             }
-            $this->message('Complete the medical questionnaire before starting the exam.');
+            $this->start_consultation_actual();
 
             return;
         }
-
-        $this->set('use_qualiphy_gfe', true);
 
         $ot_exam_id = 0;
         // if (API_KEY == '2fe548d5ae881ccfbe2be3f6237d7952') {
