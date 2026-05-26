@@ -1614,6 +1614,7 @@ class MainController extends AppPluginController {
         $ent_user = array();
         $email_string = "";
         $email_array = array();
+        $pending_list_526_phones = array();
         $field_valid = $is_email ? '(DNS.allow_email IS NULL OR DNS.allow_email = 1)' :
                        ($is_sms ? '(DNS.allow_sms IS NULL OR DNS.allow_sms = 1)' : '(DNS.allow_push IS NULL OR DNS.allow_push = 1)');
         $SU = array();
@@ -1684,6 +1685,33 @@ class MainController extends AppPluginController {
             ->where($notExistsCoursePaymentSql)
             ->group(['SysUsers.email'])
             ->toArray();
+        } else if ($type == 'PENDING LIST 5_26') {
+            // External list (filtered_list); no sys_users — email via Mailchimp, SMS via direct Twilio.
+            $rawRows = $this->SysUsers->getConnection()->execute(
+                "SELECT DISTINCT Email, Phone FROM filtered_list
+                WHERE (`Email` IS NOT NULL AND TRIM(Email) <> '' OR Phone IS NOT NULL AND TRIM(Phone) <> '')
+                AND `LEVEL 1` = 'NO'
+                AND `LEVEL 2` = 'NO'
+                AND `LEVEL 3` = 'NO'
+                AND `Subscribed Tox MD` = 'INACTIVE'"
+            )->fetchAll('assoc');
+            $phonesSeen = array();
+            foreach ($rawRows as $row) {
+                $email = isset($row['Email']) ? trim((string)$row['Email']) : '';
+                if ($email !== '' && filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                    $ent_user[] = [
+                        'id' => $email,
+                        'email' => $email,
+                        'name' => '',
+                        'lname' => '',
+                    ];
+                }
+                $phoneE164 = $this->normalizeBulkSmsPhoneNumber(isset($row['Phone']) ? $row['Phone'] : '');
+                if ($phoneE164 !== null && !isset($phonesSeen[$phoneE164])) {
+                    $phonesSeen[$phoneE164] = true;
+                    $pending_list_526_phones[] = $phoneE164;
+                }
+            }
         } else if($type == 'INJECTOR BOOKED BASIC TRAINING'){
             if(count($SU)>0){
                 $where = ['SysUsers.deleted' => 0,'SysUsers.type' => 'injector','SysUsers.active' => 1, 'CatTrainings.scheduled >=' => $now, 'CatTrainings.level' => 'LEVEL 1', $field_valid,$SU] ;
@@ -2044,7 +2072,29 @@ class MainController extends AppPluginController {
              
         // print_r($ent_user); exit;
         foreach ($ent_user as $row) {
-            $users_array[] = $row['id'];
+            if ($type == 'PENDING LIST 5_26') {
+                $users_array[] = $row['email'];
+            } else {
+                $users_array[] = $row['id'];
+            }
+        }
+
+        if ($type == 'PENDING LIST 5_26' && (int)$is_sms === 1 && (int)$is_email === 0) {
+            $this->sendBulkSmsToPhoneNumbers($body, $pending_list_526_phones);
+            $is_dev = env('IS_DEV', false);
+            if (!$is_dev) {
+                $this->send_email_after_register(
+                    'myspa@myspalive.com, cora@advantedigital.com',
+                    'bulk notification',
+                    $body . '</br></br> Number of SMS recipients: ' . count($pending_list_526_phones)
+                );
+            }
+            return;
+        }
+
+        if ($type == 'PENDING LIST 5_26' && (int)$is_sms === 0 && (int)$is_email === 0) {
+            $this->message('PENDING LIST 5_26 requires email or SMS.');
+            return;
         }
 
         if ($is_email == 1) {
@@ -21670,6 +21720,83 @@ class MainController extends AppPluginController {
     // private function notify_devices($message, $arr_users, $notify_push = false, $notify_email = false, $shouldSave = true) {
 
     //$Main->notify_devices('FIRST_CLAIM',array($ent_treatment->patient_id),true,true,true, array(), '',array(),true,false,$treatment_uid);
+
+    /**
+     * Strip (), -, spaces, etc. and return US E.164 (+1xxxxxxxxxx) or null.
+     */
+    private function normalizeBulkSmsPhoneNumber($phone)
+    {
+        $digits = preg_replace('/\D+/', '', (string)$phone);
+        if ($digits === '') {
+            return null;
+        }
+        if (strlen($digits) === 11 && $digits[0] === '1') {
+            $digits = substr($digits, 1);
+        }
+        if (strlen($digits) !== 10) {
+            return null;
+        }
+        return '+1' . $digits;
+    }
+
+    /**
+     * Bulk SMS to phone numbers outside sys_users (e.g. filtered_list).
+     */
+    private function sendBulkSmsToPhoneNumbers($body, array $phones)
+    {
+        $is_dev = env('IS_DEV', false);
+        if ($is_dev) {
+            $this->log(__METHOD__ . ' SMS skipped in dev; recipient_count=' . count($phones));
+            return;
+        }
+
+        $normalized = array();
+        foreach ($phones as $phone) {
+            $e164 = $this->normalizeBulkSmsPhoneNumber($phone);
+            if ($e164 !== null) {
+                $normalized[$e164] = true;
+            }
+        }
+        $phones = array_keys($normalized);
+        if (empty($phones)) {
+            $this->log(__METHOD__ . ' SMS skipped: no valid phone numbers.');
+            return;
+        }
+
+        set_time_limit(0);
+        ini_set('max_execution_time', '0');
+
+        $sid = env('TWILIO_ACCOUNT_SID');
+        $token = env('TWILIO_AUTH_TOKEN');
+        if (empty($sid) || empty($token)) {
+            $this->log(__METHOD__ . ' SMS skipped: Twilio credentials are not configured.');
+            return;
+        }
+
+        try {
+            $twilio = new Client($sid, $token);
+            $twilio_number = '+19516434078';
+            $smsCount = count($phones);
+            $smsIndex = 0;
+
+            foreach ($phones as $phone_number) {
+                try {
+                    $twilio->messages->create($phone_number, [
+                        'body' => $body,
+                        'from' => $twilio_number,
+                    ]);
+                } catch (TwilioException $e) {
+                    $this->log(__LINE__ . ' TwilioException bulk filtered_list ' . $phone_number . ' ' . json_encode($e->getCode()));
+                }
+                $smsIndex++;
+                if ($smsIndex < $smsCount) {
+                    sleep(1);
+                }
+            }
+        } catch (TwilioException $e) {
+            $this->log(__METHOD__ . ' Twilio client error: ' . $e->getMessage());
+        }
+    }
 
     public function notify_devices($message, $arr_users, $notify_push = false, $notify_email = false, $shouldSave = true, $data = array(),$body_extra = '', $constants = array(), $notify_sms = false, $force_hour = false, $treatment_uid='', $bulk = false) {
 
