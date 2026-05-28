@@ -2089,6 +2089,13 @@ class CourseController extends AppPluginController {
                 }
             }
 
+            $this->loadModel('SpaLiveV1.CatProducts');
+            $level3_product_available = $this->CatProducts->find()->where(['CatProducts.id' => 184, 'CatProducts.deleted' => 0, 'CatProducts.stock' => 1])->first();
+
+            if (empty($level3_product_available) && $level_3 === 'BUY') {
+                $level_3 = 'HIDE';
+            }
+
             // OTHER COURSES LIST
 
             $arr_other_courses_list = [];
@@ -2143,7 +2150,7 @@ class CourseController extends AppPluginController {
                 }
             // }
 
-            if ($level_3 == 'BUY')  {
+            if (!empty($level3_product_available) && $level_3 == 'BUY')  {
                 $arr_other_courses_list[] = [
                     'title' => 'LEVEL 3',
                     'status' => $level_3,
@@ -2422,6 +2429,7 @@ class CourseController extends AppPluginController {
 
         $this->loadModel('SpaLiveV1.CatProducts');
         $fillers_product_available = $this->CatProducts->find()->where(['CatProducts.id' => 178, 'CatProducts.deleted' => 0, 'CatProducts.stock' => 1])->first();
+        $level3_product_available = $this->CatProducts->find()->where(['CatProducts.id' => 184, 'CatProducts.deleted' => 0, 'CatProducts.stock' => 1])->first();
         $offer_fillers_ot_course = !empty($fillers_product_available) && CourseController::validateBasicAndAdvancedTraining($this);
 
         if (count($ent_training) > 0 || !empty($ent_training_adv) || count($ent_training_dynamic) > 0 || !empty($ent_training_fillers) || $offer_fillers_ot_course) {
@@ -3084,6 +3092,10 @@ class CourseController extends AppPluginController {
                 }
             }
 
+            if (empty($level3_product_available) && $level_3 === 'BUY') {
+                $level_3 = 'HIDE';
+            }
+
             // OTHER COURSES LIST
 
             $arr_other_courses_list = [];
@@ -3140,7 +3152,7 @@ class CourseController extends AppPluginController {
                 }
             // }
 
-            if ($level_3 == 'BUY' || $level_3 == 'BOOK')  {
+            if (!empty($level3_product_available) && ($level_3 == 'BUY' || $level_3 == 'BOOK'))  {
                 $arr_other_courses_list[] = [
                     'title' => 'LEVEL 3',
                     'status' => $level_3,

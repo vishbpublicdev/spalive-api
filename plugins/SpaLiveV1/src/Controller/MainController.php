@@ -24346,12 +24346,14 @@ class MainController extends AppPluginController {
 
         // Stock + prerequisites: basic neurotoxin + (advanced online or LEVEL 2 in-person); see CourseController::validateBasicAndAdvancedTraining
         $fillers = $this->CatProducts->find()->where(['CatProducts.id' => 178, 'CatProducts.deleted' => 0, 'CatProducts.stock' => 1])->first();
+        $level3_medical_product = $this->CatProducts->find()->where(['CatProducts.id' => 184, 'CatProducts.deleted' => 0, 'CatProducts.stock' => 1])->first();
         $hasBasicAndAdvancedCourse = CourseController::validateBasicAndAdvancedTraining($this);
         $hasFillerEquivalentTraining = CourseController::userHasFillerEquivalentTraining($this, (int)USER_ID);
         if ($hasFillerEquivalentTraining) {
             $show_buy_button_level_3_fillers = false;
         }
         $canShowBuyButtonLevel3Fillers = !empty($fillers) && $hasBasicAndAdvancedCourse && $show_buy_button_level_3_fillers;
+        $canShowBuyButtonLevel3Medical = !empty($level3_medical_product) && $show_buy_button_level_3_medical;
 
         $message_level_3_fillers_prerequisite = '';
         if (!empty($fillers) && $show_buy_button_level_3_fillers && !$hasBasicAndAdvancedCourse && !$hasFillerEquivalentTraining) {
@@ -24365,7 +24367,7 @@ class MainController extends AppPluginController {
         $this->set("show_buy_button_advanced", $show_buy_button_advanced);
         // $this->set("show_buy_button_level_3_fillers", $show_buy_button_level_3_fillers);
         //$this->set("show_buy_button_level_3_fillers", false);
-        $this->set("show_buy_button_level_3_medical", $show_buy_button_level_3_medical);
+        $this->set("show_buy_button_level_3_medical", $canShowBuyButtonLevel3Medical);
         //$this->set("show_buy_button_level_1_to_1", $show_buy_button_level_1_to_1);
         $this->set("show_buy_button_level_1_to_1", false);
         $this->set('data_trainings', $trainings_data);
