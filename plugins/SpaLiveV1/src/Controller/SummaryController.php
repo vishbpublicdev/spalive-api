@@ -8029,7 +8029,8 @@ class SummaryController extends AppPluginController{
                             ])
                             ->first();
                         if (empty($subscription_md)) {
-                            $status = 'MD';
+                            // Use SUBSCRIBE so the app opens the unified agreements screen (MSL + MD together)
+                            $status = 'SUBSCRIBE';
                         }
                     }
                     $agreement_msl = null;
@@ -8154,7 +8155,8 @@ class SummaryController extends AppPluginController{
                         ])
                         ->first();
                     if (empty($subscription_md)) {
-                        $status = 'MD';
+                        // Use SUBSCRIBE so the app opens the unified agreements screen (MSL + MD together)
+                        $status = 'SUBSCRIBE';
                     }
                 }
 
