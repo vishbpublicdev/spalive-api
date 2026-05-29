@@ -60,10 +60,10 @@ class MigrateUserLicenseDocumentsCommand extends Command
             ->addOption('checkpoint-key', [
                 'default' => self::CHECKPOINT_DEFAULT,
             ])
-            ->addOption('resume', [
+            ->addOption('no-resume', [
                 'boolean' => true,
-                'default' => true,
-                'help' => 'When --from-id=0, continue from checkpoint.',
+                'default' => false,
+                'help' => 'Start from sys_licences.id>0 (ignore migration_checkpoints).',
             ])
             ->addOption('force', [
                 'boolean' => true,
@@ -80,7 +80,8 @@ class MigrateUserLicenseDocumentsCommand extends Command
         $fromId = max(0, (int)$args->getOption('from-id'));
         $maxRows = max(0, (int)$args->getOption('max-rows'));
         $checkpointKey = (string)$args->getOption('checkpoint-key');
-        $resume = (bool)$args->getOption('resume');
+        // CakePHP boolean options are false when omitted (default=>true on boolean is ignored).
+        $resume = !(bool)$args->getOption('no-resume');
         $force = (bool)$args->getOption('force');
 
         if (!is_file($configPath)) {
@@ -132,13 +133,25 @@ class MigrateUserLicenseDocumentsCommand extends Command
 
         if (!$dryRun) {
             $this->ensureMapTable($target);
+            $this->ensureCheckpointTable($target);
         }
 
         $lastId = $fromId;
+        $checkpointLoaded = null;
         if ($fromId === 0 && $resume) {
-            $cp = $this->checkpointGet($target, $checkpointKey);
-            if ($cp !== null && $cp > 0) {
-                $lastId = $cp;
+            $checkpointLoaded = $this->checkpointGet($target, $checkpointKey);
+            if ($checkpointLoaded !== null && $checkpointLoaded > 0) {
+                $lastId = $checkpointLoaded;
+            }
+        }
+
+        if ($fromId === 0) {
+            if ($resume && $checkpointLoaded !== null && $checkpointLoaded > 0) {
+                $io->out("Resuming from checkpoint last_legacy_id={$checkpointLoaded}");
+            } elseif ($resume) {
+                $io->out('No checkpoint row found; starting from sys_licences.id > 0');
+            } else {
+                $io->warning('Resume disabled (--no-resume); starting from sys_licences.id > 0');
             }
         }
 
@@ -723,6 +736,17 @@ class MigrateUserLicenseDocumentsCommand extends Command
             ':storage_bucket' => $bucket,
             ':storage_path' => $storagePath,
         ]);
+    }
+
+    private function ensureCheckpointTable(PDO $target): void
+    {
+        $target->exec('
+            CREATE TABLE IF NOT EXISTS public.migration_checkpoints (
+              name text PRIMARY KEY,
+              last_legacy_id bigint NOT NULL,
+              updated_at timestamptz NOT NULL DEFAULT now()
+            )
+        ');
     }
 
     private function ensureMapTable(PDO $target): void
