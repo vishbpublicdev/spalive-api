@@ -17171,6 +17171,7 @@ class MainController extends AppPluginController {
                     if (!empty($r['jwt'])) {
                         $this->set('jwt', $r['jwt']);
                     }
+                    $this->set('zoom_sdk_key', $this->zoomSdkKeyForClient());
                     $this->set('use_qualiphy_gfe', false);
                     $this->set('gfe_provider', 'examiner_zoom');
                     $this->success();
@@ -18861,23 +18862,12 @@ class MainController extends AppPluginController {
             $this->set('meeting_id', $arr_response['id']);
             $this->set('meeting_pass', isset($arr_response['password']) ? $arr_response['password'] : '');
 
-            $iat = time();
-            $exp = $iat + 60 * 60;
-            $sdkKey = env('ZOOM_SDK_KEY', '');
-            $sdkSecret = env('ZOOM_SDK_SECRET', '');
-
-            $payload = [
-                'sdkKey' => $sdkKey,
-                'mn' => isset($arr_response['id']) ? $arr_response['id'] : '',
-                'role' => 0,
-                'iat' => $iat,
-                'exp' => $exp,
-                'appKey' => $sdkKey,
-                'tokenExp' => $exp,
-            ];
-
-            $jwt = JWT::encode($payload, $sdkSecret, 'HS256');
+            $jwt = $this->buildZoomMeetingSdkJwt(
+                isset($arr_response['id']) ? $arr_response['id'] : '',
+                0
+            );
             $this->set('jwt', $jwt);
+            $this->set('zoom_sdk_key', $this->zoomSdkKeyForClient());
             $arr_response['jwt'] = $jwt;
 
             return $arr_response;
@@ -19456,20 +19446,7 @@ class MainController extends AppPluginController {
 
                 $dd = explode(' ',$row['schedule_date']);
 
-                //JWT for Flutter Web
-                $iat = time();
-                $exp = $iat + 60 * 60;
-                $sdkKey = env('ZOOM_SDK_KEY','');
-                $sdkSecret = env('ZOOM_SDK_SECRET','');
-                $payload = [
-                    'sdkKey' => $sdkKey,
-                    'mn'=> trim($row['meeting']), //meet number
-                    'role' =>  0,
-                    'iat' =>  $iat,
-                    'exp' =>  $exp,
-                    'appKey' =>  $sdkKey,
-                    'tokenExp' =>  $exp
-                ];
+                $jwt = $this->buildZoomMeetingSdkJwt(trim((string)$row['meeting']), 0);
 
                 $treatments = str_replace(",", ", ", trim($row['treatments']));
 
@@ -19477,12 +19454,12 @@ class MainController extends AppPluginController {
                     $treatments = "Neurotoxins & Fillers";
                 }
 
-                $jwt = JWT::encode($payload, $sdkSecret, 'HS256');
                 $result[] = array(
                     'uid' => $row['uid'],
                     'meeting_pass' => trim($row['meeting_pass']),
                     'meeting' => trim($row['meeting']),
                     'jwt' => !empty($jwt) ? $jwt : '',
+                    'zoom_sdk_key' => $this->zoomSdkKeyForClient(),
                     'patient' => $patient,
                     'assistance' => isset($row['assistance']) ? "Dr. " . $row['assistance'] : "",
                     'assistance_id' => $row['assistance_id'],

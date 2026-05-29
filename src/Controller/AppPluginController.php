@@ -8,6 +8,7 @@ use Cake\ORM\TableRegistry;
 use Cake\Event\EventInterface;
 use Cake\Core\Configure;
 use Cake\Mailer\Mailer;
+use Firebase\JWT\JWT;
 
 class AppPluginController extends Controller
 {
@@ -101,6 +102,41 @@ class AppPluginController extends Controller
             'emergencyPhone' => ',' . $display,
             'emergencyPhone2' => $display,
         ];
+    }
+
+    /**
+     * Zoom Meeting SDK JWT (Web/Mobile). Must use SDK Client ID + Secret from Marketplace.
+     * role 0 = participant (examiner/patient join existing meeting); 1 = host only if that user owns the meeting.
+     */
+    protected function buildZoomMeetingSdkJwt($meetingNumber, int $role = 0): string
+    {
+        $sdkKey = env('ZOOM_SDK_KEY', '');
+        $sdkSecret = env('ZOOM_SDK_SECRET', '');
+        if ($sdkKey === '' || $sdkSecret === '') {
+            return '';
+        }
+        $mn = preg_replace('/\D/', '', (string)$meetingNumber);
+        if ($mn === '') {
+            return '';
+        }
+        $iat = time() - 30;
+        $exp = $iat + (60 * 60 * 2);
+        $payload = [
+            'sdkKey' => $sdkKey,
+            'appKey' => $sdkKey,
+            'mn' => ctype_digit($mn) ? (int)$mn : $mn,
+            'role' => $role,
+            'iat' => $iat,
+            'exp' => $exp,
+            'tokenExp' => $exp,
+        ];
+
+        return JWT::encode($payload, $sdkSecret, 'HS256');
+    }
+
+  protected function zoomSdkKeyForClient(): string
+    {
+        return trim((string)env('ZOOM_SDK_KEY', ''));
     }
 
     public function send($str_message, $data = array(), $array_devices_ids = array()){

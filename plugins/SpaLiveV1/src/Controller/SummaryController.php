@@ -76,6 +76,22 @@ class SummaryController extends AppPluginController{
         return !in_array($v, ['0', 'false', 'no', 'off'], true);
     }
 
+    /**
+     * Resolves emergency phone numbers; uses parent override when deployed on server.
+     */
+    protected function resolveEmergencyPhones(array $user): array
+    {
+        $parentClass = get_parent_class($this);
+        if ($parentClass && method_exists($parentClass, 'emergencyPhoneOverrideForInjectorMd176')) {
+            return parent::emergencyPhoneOverrideForInjectorMd176($user);
+        }
+
+        return [
+            'emergencyPhone' => $this->emergencyPhone,
+            'emergencyPhone2' => $this->emergencyPhone2,
+        ];
+    }
+
 	public function initialize() : void{
         parent::initialize();
         $this->URL_API = env('URL_API', 'https://api.myspalive.com/');
@@ -201,7 +217,7 @@ class SummaryController extends AppPluginController{
         //treatments controller para separar los tratamientos
         $Treatments = new TreatmentsController();
             
-        $phones = $this->emergencyPhoneOverrideForInjectorMd176($user);
+        $phones = $this->resolveEmergencyPhones($user);
         $this->emergencyPhone = $phones['emergencyPhone'];
         $this->emergencyPhone2 = $phones['emergencyPhone2'];
         $this->set('emergencyPhone', $this->emergencyPhone);
@@ -2400,7 +2416,7 @@ class SummaryController extends AppPluginController{
 
         $Treatments = new TreatmentsController();
 
-        $phones = $this->emergencyPhoneOverrideForInjectorMd176($user);
+        $phones = $this->resolveEmergencyPhones($user);
         $this->emergencyPhone = $phones['emergencyPhone'];
         $this->emergencyPhone2 = $phones['emergencyPhone2'];
         $this->set('emergencyPhone', $this->emergencyPhone);
@@ -6407,7 +6423,7 @@ class SummaryController extends AppPluginController{
 
         ////NTsts
 
-        $phones = $this->emergencyPhoneOverrideForInjectorMd176($user);
+        $phones = $this->resolveEmergencyPhones($user);
         $this->emergencyPhone = $phones['emergencyPhone'];
         $this->emergencyPhone2 = $phones['emergencyPhone2'];
         $this->set('emergencyPhone', $this->emergencyPhone);
@@ -6461,12 +6477,12 @@ class SummaryController extends AppPluginController{
             $_where = " AND DC.language IN ('ENGLISH')";
         }
 
-        $examiner_state = $ent_user->state;
-        
+        $examiner_state = (int)($ent_user->state ?? 0);
+
         if (empty($ent_permiso)) {
             $_where = " AND DC.type IN ('spa')";
-            $_where_state = "AND SU.state = {$examiner_state}";
-        }else{
+            $_where_state = $examiner_state > 0 ? "AND SU.state = {$examiner_state}" : '';
+        } else {
             $_where = " AND DC.type IN ('spa', 'mint')";
             $_where_state = '';
         }
@@ -6504,24 +6520,26 @@ class SummaryController extends AppPluginController{
 
         
         $ent_query = $this->SysUsers->getConnection()->execute($str_query)->fetchAll('assoc');
-        
-        if (empty($ent_query)) {
-            return;
-        }
 
-        $response_gfe = array();
-        $response_gfe['schedule'] = intval($ent_query[0]['schedule']);
-        $response_gfe['waiting'] = intval($ent_query[0]['waiting']);
+        $response_gfe = array(
+            'schedule' => 0,
+            'waiting' => 0,
+        );
+        if (!empty($ent_query)) {
+            $response_gfe['schedule'] = intval($ent_query[0]['schedule']);
+            $response_gfe['waiting'] = intval($ent_query[0]['waiting']);
+        }
 
         $this->set('login_status', $ent_user->login_status);
         $this->set('gfe', $response_gfe);
 
         // other services
+        $_where_gfe_os_state = $examiner_state > 0 ? "SU.state = {$examiner_state} AND " : '';
         $str_query = "
         SELECT COUNT(DC.id) as waiting
             FROM data_consultation_other_services DC
             JOIN sys_users SU ON SU.id = DC.patient_id
-            WHERE SU.state = {$examiner_state} AND DC.deleted = 0
+            WHERE {$_where_gfe_os_state}DC.deleted = 0
             AND (
                 (
                     (DC.assistance_id = 0 AND DC.schedule_by = 0 AND status = 'INIT')
@@ -6606,7 +6624,7 @@ class SummaryController extends AppPluginController{
                         'schedule_date' => $row['schedule_date']->i18nFormat('yyyy-MM-dd HH:mm'),
                         'patient' => $row['patient'],
                         'treatments' => $row['treatments'],
-                        'state' => $row['State']['name'],
+                        'state' => $row['State']['name'] ?? '',
                     );
             }
         }
@@ -7327,7 +7345,14 @@ class SummaryController extends AppPluginController{
                    
                 ];
 
-                $jwt = JWT::encode($payload, $sdkSecret, 'HS256');
+                $jwt = '';
+                if (!empty($sdkSecret) && !empty($sdkKey) && !empty($row_c->meeting)) {
+                    try {
+                        $jwt = JWT::encode($payload, $sdkSecret, 'HS256');
+                    } catch (\Throwable $e) {
+                        $jwt = '';
+                    }
+                }
 
                 $this->loadModel('SpaLiveV1.DataConsultationAnswersOtherServices');
                 $this->loadModel('SpaLiveV1.CatQuestionOtherServices');
@@ -7348,7 +7373,7 @@ class SummaryController extends AppPluginController{
                     foreach($ent_answers as $row_ans) {
                         $questions[] = array(
                             'id'        => $row_ans->id,
-                            'question'  => $row_ans["Question"]["question"],
+                            'question'  => $row_ans['Question']['question'] ?? '',
                             'response'  => $row_ans->response,
                         );
                     }
@@ -7359,7 +7384,7 @@ class SummaryController extends AppPluginController{
                     'meeting'          => $row_c->meeting,
                     'meeting_pass'     => $row_c->meeting_pass,
                     'join_url'         => $row_c->join_url,
-                    'schedule_date'    => $row_c->schedule_date->i18nFormat('MM-dd-yyyy hh:mm a'),
+                    'schedule_date'    => !empty($row_c->schedule_date) ? $row_c->schedule_date->i18nFormat('MM-dd-yyyy hh:mm a') : '',
                     'user_name'        => $row_c->patient_name,
                     'jwt'              => $jwt,
                     'created_by'       => $row_c->createdby,
@@ -7369,7 +7394,7 @@ class SummaryController extends AppPluginController{
                     'is_waiting'       => $row_c->is_waiting,
                     'notes'            => $row_c->notes,
                     'patient_id'       => $row_c->patient_id,
-                    'service_title'    => $row_c["Service"]["title"],
+                    'service_title'    => $row_c['Service']['title'] ?? '',
                     'service_uid'      => $row_c->service_uid,
                     'status'           => $row_c->status,
                     'questions'        => $questions,
@@ -7402,7 +7427,7 @@ class SummaryController extends AppPluginController{
                     }
 
                     $exa_ser_array[] = array(
-                        'service_title'     => $row_e["Service"]["title"],
+                        'service_title'     => $row_e['Service']['title'] ?? '',
                         'aprovied'          => $approved,
                     );
                 }
@@ -7457,20 +7482,22 @@ class SummaryController extends AppPluginController{
 
         foreach($pending_answers as $pa){
 
-            $created = $pa->created->format('m/d/Y H:i');
+            $created = !empty($pa->created) ? $pa->created->format('m/d/Y H:i') : '';
+            $consultationOs = $pa['DataConsultationOtherServices'] ?? [];
+            $serviceUid = $consultationOs['service_uid'] ?? null;
 
             $array_dos[] = [
                 "id" => $pa->id,
                 "consultation_uid" => $pa->consultation_uid,
                 "created" => $created,
-                "schedule_date" => $pa->call_date->format('m/d/Y'),
-                "patient_fname" => $pa["Patient"]["name"].' '.$pa["Patient"]["lname"],
+                "schedule_date" => !empty($pa->call_date) ? $pa->call_date->format('m/d/Y') : '',
+                "patient_fname" => trim(($pa['Patient']['name'] ?? '') . ' ' . ($pa['Patient']['lname'] ?? '')),
                 "call_type" => $pa->call_type, // "FIRST CONSULTATION", "CHECK IN", "FOLLOW UP
                 "call_title" => $pa->call_title,
-                "service_title" => $this->get_service_title($pa["DataConsultationOtherServices"]["service_uid"]),
-                "service_uid" => $pa["DataConsultationOtherServices"]["service_uid"],
+                "service_title" => $this->get_service_title($serviceUid),
+                "service_uid" => $serviceUid,
                 "current_weight" => $pa->current_weight,
-                "main_goal_weight" => $pa["DataConsultationOtherServices"]["main_goal_weight"],                 
+                "main_goal_weight" => $consultationOs['main_goal_weight'] ?? null,
             ];
         }
 
@@ -7641,9 +7668,12 @@ class SummaryController extends AppPluginController{
     }
 
     public function get_service_title($service_uid){
+        if (empty($service_uid)) {
+            return '';
+        }
         $this->loadModel('SpaLiveV1.CatOtherServices');
         $service = $this->CatOtherServices->find()->select(['title'])->where(['uid' => $service_uid])->first();
-        return $service->title; 
+        return !empty($service) ? (string)$service->title : '';
     }
 
     public function services_injector(
