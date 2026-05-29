@@ -1776,7 +1776,6 @@ class TreatmentsController extends AppPluginController{
         $this->loadModel('SpaLiveV1.CatTrainings');
 
         $token = get('token',"");
-
         if(!empty($token)){
             $user = $this->AppToken->validateToken($token, true);
             if($user === false){
@@ -1800,6 +1799,8 @@ class TreatmentsController extends AppPluginController{
         ])
         ->where(['DataTrainings.user_id' => USER_ID, 'DataTrainings.deleted' => 0, 'CatTrainings.deleted' => 0])
         ->all();
+
+        $this->set('user_trainings', $user_trainings);
         
         $courses_id = [];
         if(count($user_trainings) > 0){
@@ -1830,7 +1831,47 @@ class TreatmentsController extends AppPluginController{
                 $courses_id = array_values(array_unique($courses_id, SORT_NUMERIC));
             }
         }
-        // Busqueda de cursos        
+        // Busqueda de cursos
+
+        // Pacientes en tratamiento activo sin curso/training (ej. otras escuelas).
+        if (strtoupper($user['user_role']) != 'examiner') {
+            $this->loadModel('SpaLiveV1.DataTreatment');
+            $activeTreatments = $this->DataTreatment->find()
+                ->select([
+                    'DataTreatment.treatments',
+                    'treatments_string' => "(SELECT GROUP_CONCAT(CONCAT(CTC.name,' (',CT.name, ')') SEPARATOR ', ')
+                        FROM cat_treatments_ci CT
+                        JOIN cat_treatments_category CTC ON CTC.id = CT.category_treatment_id
+                        WHERE FIND_IN_SET(CT.id, DataTreatment.treatments))",
+                ])
+                ->where([
+                    'DataTreatment.patient_id' => USER_ID,
+                    'DataTreatment.status IN' => ['PETITION', 'REQUEST', 'CONFIRM'],
+                    'DataTreatment.deleted' => 0,
+                ])
+                ->all();
+
+            foreach ($activeTreatments as $activeTreatment) {
+                if (empty($activeTreatment->treatments_string)) {
+                    continue;
+                }
+                $separate_treatments = $this->separate_treatments($activeTreatment->treatments_string);
+                if (!empty($separate_treatments['neurotoxins']) || !empty($separate_treatments['fillers'])) {
+                    if (!in_array(92, $courses_id, true)) {
+                        $courses_id[] = 92;
+                    }
+                }
+                if (!empty($separate_treatments['iv_therapy']) && defined('USER_STATE') && USER_STATE == 10) {
+                    if (!in_array(35, $courses_id, true)) {
+                        $courses_id[] = 35;
+                    }
+                }
+            }
+
+            if (count($courses_id) > 0) {
+                $courses_id = array_values(array_unique($courses_id, SORT_NUMERIC));
+            }
+        }
         
         $fields = ['DataConsultation.uid','DataConsultation.payment','DataConsultation.schedule_date','DataCertificates.uid','DataCertificates.date_start','DataCertificates.date_expiration', 'DataCertificates.certificate_url', 'treatments_id' => 'DataConsultation.treatments'];
         $fields['assistance'] = "(SELECT UP.name FROM sys_users UP WHERE UP.id = DataConsultation.assistance_id)";
@@ -1922,15 +1963,20 @@ class TreatmentsController extends AppPluginController{
             return false;
         }
 
+        $this->set('courses_id', $courses_id);
+
         if(count($courses_id) > 0){
             foreach($courses_id as $course_id){
                 // Saltar si ya existe
                 if (hasTreatmentInList($list_gfe_requires, $course_id)) {
                     continue;
                 }
-                $ot = $course_id == 92 || $course_id == 93 ? false : true;
+                $ot = !in_array($course_id, [92, 93, 35], true);
                 $title = '';
-                if($ot){
+                if($course_id == 35){
+                    $title = 'IV Therapy';
+                    $cat_course_type_id = 35;
+                }else if($ot){
                     $course_type = $this->CatTrainings->find()
                     ->select(['CatCoursesType.title', 'CatCoursesType.id'])
                     ->join([
@@ -1944,6 +1990,7 @@ class TreatmentsController extends AppPluginController{
                     $title = 'Botox & other neurotoxins,Fillers & Hylenex';
                     $cat_course_type_id = $course_id;
                 }
+                $gfe_treatment_ids = $course_id == 35 ? '35' : '92,93';
                 $fields = ['DataConsultation.uid','DataConsultation.payment','DataConsultation.schedule_date','DataCertificates.uid','DataCertificates.date_start','DataCertificates.date_expiration', 'DataCertificates.certificate_url', 'DataConsultation.treatments'];
                 $fields['expirate_soon'] = "(IF(DATEDIFF(NOW(), DataCertificates.date_expiration) < 30,1,0))";
 
@@ -1969,6 +2016,8 @@ class TreatmentsController extends AppPluginController{
                 ])
                 ->where($_where)->last();
 
+                $this->set('gfes', $gfes);
+
                 if(empty($gfes)){
                     $list_gfe_requires[] = [
                         'course_id' => $course_id,
@@ -1976,7 +2025,7 @@ class TreatmentsController extends AppPluginController{
                         'button_text' => 'Get my GFE',
                         'status_gfe' => '',
                         'ot' => $ot,
-                        'treatments' => $ot ? $cat_course_type_id : '92,93',
+                        'treatments' => $ot ? (string)$cat_course_type_id : $gfe_treatment_ids,
                     ];
                 }else{
                     $current_date_validation = date('Y-m-d');
@@ -1991,6 +2040,8 @@ class TreatmentsController extends AppPluginController{
                         $expires_soon = false;
                         $expired = false;
                     }
+
+                    $this->set('expired', $expired);
 
                     if($expired != true){
                         if($expires_soon == true){
@@ -2012,7 +2063,7 @@ class TreatmentsController extends AppPluginController{
                                     'ot' => $ot,
                                     'treatments' => $gfes['treatments'],
                                 ];
-                            }else if($gfes['date_expiration'] >= $current_date_validation){
+                            }else if(!empty($gfes['DataCertificates']['date_expiration']) && $gfes['DataCertificates']['date_expiration'] >= $current_date_validation){
                                 
                                 $diference_in_seconds = strtotime($gfes['DataCertificates']['date_expiration']) - strtotime($current_date_validation);
                                 
