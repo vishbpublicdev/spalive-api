@@ -2379,7 +2379,7 @@ class SubscriptionController extends AppPluginController {
                 $has_cancelled_subscription,
                 $is_iv_therapy
             );
-            $charge_amount = (int) ($total_msl_total + $total_md_total);
+            $charge_amount = $requires_immediate_charge ? (int) ($total_msl_total + $total_md_total) : 0;
             $stripe_refs = $this->createOtStripePaymentIntent($customer['id'], $payment_method, $charge_amount);
 
             if ($requires_immediate_charge) {
@@ -2863,7 +2863,7 @@ class SubscriptionController extends AppPluginController {
                 $has_cancelled_subscription,
                 false
             );
-            $charge_amount = (int) ($total_msl_total + $total_md_total);
+            $charge_amount = $requires_immediate_charge ? (int) ($total_msl_total + $total_md_total) : 0;
             $stripe_refs = $this->createOtStripePaymentIntent($customer['id'], $payment_method, $charge_amount);
 
             if ($requires_immediate_charge) {
