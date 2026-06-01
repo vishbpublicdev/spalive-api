@@ -1953,6 +1953,26 @@ class SubscriptionController extends AppPluginController {
     }
 
     /**
+     * When charge_amount > 0, Stripe must succeed before subscriptions are created.
+     *
+     * @return string|null User-facing error message, or null if charge is not required or succeeded
+     */
+    private function otStripeChargeFailedMessage(array $stripe_refs, int $charge_amount): ?string
+    {
+        if ($charge_amount <= 0) {
+            return null;
+        }
+        if (!empty($stripe_refs['error'])) {
+            return 'Your payment method is not valid. Add a new payment method and try again.';
+        }
+        if (!$this->paymentIntentChargeSucceeded($stripe_refs['stripe_result'])) {
+            return 'Your payment could not be completed. Add a new payment method and try again.';
+        }
+
+        return null;
+    }
+
+    /**
      * @return array{error: string, stripe_result: mixed, payment_id: string, charge_id: string, receipt_url: string}
      */
     private function createOtStripePaymentIntent(string $customer_id, string $payment_method, int $amount_cents, string $description = 'OT MySpaLive Subscription'): array
@@ -2196,7 +2216,7 @@ class SubscriptionController extends AppPluginController {
             'MYSPALIVES_HYBRID_TOX_FILLER_COURSE',
         ];
 
-        if (in_array($main_training_level, $levels, true)) {
+        if (in_array($main_training_level, $levels, true) && !$is_other_schools) {
 
             $_total_md = 0;
             $_total_msl = 0;
@@ -2382,15 +2402,10 @@ class SubscriptionController extends AppPluginController {
             $charge_amount = $requires_immediate_charge ? (int) ($total_msl_total + $total_md_total) : 0;
             $stripe_refs = $this->createOtStripePaymentIntent($customer['id'], $payment_method, $charge_amount);
 
-            if ($requires_immediate_charge) {
-                if (!empty($stripe_refs['error'])) {
-                    $this->message('Your payment method is not valid. Add a new payment method and try again.');
-                    return;
-                }
-                if ($charge_amount > 0 && !$this->paymentIntentChargeSucceeded($stripe_refs['stripe_result'])) {
-                    $this->message('Your payment could not be completed. Add a new payment method and try again.');
-                    return;
-                }
+            $stripe_charge_error = $this->otStripeChargeFailedMessage($stripe_refs, $charge_amount);
+            if ($stripe_charge_error !== null) {
+                $this->message($stripe_charge_error);
+                return;
             }
 
             $msl_id = null;
@@ -2665,7 +2680,7 @@ class SubscriptionController extends AppPluginController {
                 'DataSubscriptions.deleted' => 0,
                 'DataSubscriptions.status' => 'ACTIVE',
                 'DataSubscriptions.subscription_type LIKE' => '%MSL%',
-            ])->first();
+            ])->order(['DataSubscriptions.created' => 'DESC'])->first();
             $previous_services = [];
             if (!empty($ent_subscription_msl_active)) {
                 $ps = $ent_subscription_msl_active->main_service;
@@ -2675,6 +2690,59 @@ class SubscriptionController extends AppPluginController {
                 $previous_services = array_values(array_filter(array_map('trim', explode(',', $ps)), function ($s) {
                     return $s !== '';
                 }));
+            }
+
+            $sub_active = !empty($ent_subscription_msl_active);
+            $previous_msl_total = $sub_active ? (int)$ent_subscription_msl_active->total : 0;
+
+            $ent_subscription_md_active = $this->DataSubscriptions->find()->where([
+                'DataSubscriptions.user_id' => USER_ID,
+                'DataSubscriptions.deleted' => 0,
+                'DataSubscriptions.status' => 'ACTIVE',
+                'DataSubscriptions.subscription_type LIKE' => '%MD%',
+            ])->order(['DataSubscriptions.created' => 'DESC'])->first();
+            $sub_active_md = !empty($ent_subscription_md_active);
+            $previous_services_md = [];
+            if ($sub_active_md) {
+                $ps_md = $ent_subscription_md_active->main_service;
+                if (!empty($ent_subscription_md_active->addons_services)) {
+                    $ps_md .= ',' . $ent_subscription_md_active->addons_services;
+                }
+                $previous_services_md = array_values(array_filter(array_map('trim', explode(',', $ps_md)), function ($s) {
+                    return $s !== '';
+                }));
+            }
+
+            $new_treatment_names = [];
+            foreach ($ent_data_trainings as $row) {
+                $name = $row->name ?? '';
+                if ($name === '' || in_array($name, $previous_services, true)) {
+                    continue;
+                }
+                $new_treatment_names[] = $name;
+            }
+
+            $has_md_to_add = false;
+            foreach ($ent_data_trainings as $row) {
+                if (empty($row->name) || in_array($row->name, $previous_services_md, true)) {
+                    continue;
+                }
+                if (!empty($row->md) && !empty($row->md_agreement) && (int)$row->require_mdsub === 1) {
+                    $has_md_to_add = true;
+                    break;
+                }
+            }
+
+            if ($new_treatment_names === [] && !$has_md_to_add) {
+                $this->message('You already have this subscription.');
+                return;
+            }
+
+            foreach ($new_treatment_names as $name) {
+                if ($name === 'IV THERAPY') {
+                    $is_iv_therapy = true;
+                    break;
+                }
             }
 
             $_total_md = 0;
@@ -2689,6 +2757,7 @@ class SubscriptionController extends AppPluginController {
             $total_md_total = 0;
             $total_msl_coverage = 0;
             $treatment_names = '';
+            $new_msl_tier_total = 0;
 
             $this->total_subscription_ot_main_msl = round($this->validateCode(get('promo_code',''),$this->total_subscription_ot_main_msl,'SUBSCRIPTIONOT'));
             $this->total_subscription_ot_addon_msl = round($this->validateCode(get('promo_code',''),$this->total_subscription_ot_addon_msl,'SUBSCRIPTIONOT'));
@@ -2759,16 +2828,20 @@ class SubscriptionController extends AppPluginController {
             foreach($ent_data_trainings as $row) {
 
                 if (!empty($row->md_agreement) && !empty($row->msl_agreement) && (empty($row->md) || empty($row->msl)) ) continue;
+
+                if (empty($row->name) || in_array($row->name, $previous_services_md, true)) {
+                    continue;
+                }
                 
                 $tmp_total = 0;
 
                 if (!empty($row->md) && !empty($row->md_agreement) && $row->require_mdsub == 1) {
-                    if ($_total_md) {
-                        $_total_md += $this->total_subscription_ot_addon_md;
-                        $tmp_total = $this->total_subscription_ot_addon_md;
-                    } else {
+                    if ($_total_md == 0 && !$sub_active) {
                         $_total_md += $this->total_subscription_ot_main_md;
                         $tmp_total = $this->total_subscription_ot_main_md;
+                    } else {
+                        $_total_md += $this->total_subscription_ot_addon_md;
+                        $tmp_total = $this->total_subscription_ot_addon_md;
                     }
                     if (empty($main_service_md)) {
                         $main_service_md = $row->name;
@@ -2779,43 +2852,56 @@ class SubscriptionController extends AppPluginController {
                 }
             }
 
-            $total_msl_coverage = 0;
-            $treatment_names = '';
-            if (!empty($ent_data_trainings)) {
-                if ($is_other_schools) {
-                    $nameList = [];
-                    foreach ($ent_data_trainings as $row) {
-                        if (!empty($row->name)) {
-                            $nameList[] = $row->name;
-                        }
-                    }
-                    $treatment_names = implode(',', $nameList);
-                    $total_msl_coverage = count($ent_data_trainings);
-                } else {
-                    foreach ($ent_data_trainings as $row) {
-                        $total_msl_coverage = (int) $row->total_coverage;
-                        if ($total_msl_coverage !== count($ent_data_trainings)) {
-                            $total_msl_coverage = count($ent_data_trainings);
-                        }
-                        $treatment_names = $row->treatment_names;
-                    }
-                }
-                $total_msl_coverage = $total_msl_coverage + count($previous_services);
+            $total_msl_coverage = count($new_treatment_names) + count($previous_services);
+            $treatment_names = implode(',', $new_treatment_names);
+
+            $this->loadModel('SpaLiveV1.CatAgreements');
+            $ent_agreements = $this->CatAgreements->find()
+            ->select([
+                'signed' => 'DataAgreements.id',
+            ])
+            ->join([
+                'DataAgreements' => ['table' => 'data_agreements', 'type' => 'LEFT', 'conditions' => 'DataAgreements.agreement_uid = CatAgreements.uid AND DataAgreements.deleted = 0 AND DataAgreements.user_id = ' . USER_ID],
+            ])
+            ->where(['CatAgreements.state_id' => USER_STATE, 'CatAgreements.agreement_type' => 'OTHER_TREATMENTS', 'CatAgreements.deleted' => 0, 'CatAgreements.issue_type' => 'MSL'])
+            ->first();
+
+            if (empty($ent_agreements->signed)) {
+                $ent_agreements = $this->CatAgreements->find()
+                ->select([
+                    'signed' => 'DataAgreements.id',
+                ])
+                ->join([
+                    'DataAgreements' => ['table' => 'data_agreements', 'type' => 'LEFT', 'conditions' => 'DataAgreements.agreement_uid = CatAgreements.uid AND DataAgreements.deleted = 0 AND DataAgreements.user_id = ' . USER_ID],
+                ])
+                ->where(['CatAgreements.state_id' => USER_STATE, 'CatAgreements.agreement_type LIKE' => '%MSL%', 'CatAgreements.deleted' => 0])
+                ->first();
             }
 
-            if($total_msl_coverage > 0){
+            if (!empty($ent_agreements->signed) && $total_msl_coverage > 0) {
                 $index = max(0, min($total_msl_coverage - 1, count($this->prices_msl) - 1));
-                $_total_msl += $this->prices_msl[$index];
-                $array_treatment_names = array_values(array_filter(array_map('trim', explode(',', $treatment_names)), function ($s) {
-                    return $s !== '';
-                }));
-                $main_service_msl = $array_treatment_names[0] ?? '';
-                if(count($array_treatment_names) > 1){
-                    $subs_msl_addons = array_slice($array_treatment_names, 1);
+                $new_msl_tier_total = $this->prices_msl[$index];
+                $_total_msl = max(0, $new_msl_tier_total - $previous_msl_total);
+
+                if ($sub_active) {
+                    $main_service_msl = $ent_subscription_msl_active->main_service;
+                    $existing_msl_addons = array_values(array_filter(array_map('trim', explode(',', $ent_subscription_msl_active->addons_services ?? ''))));
+                    $subs_msl_addons = array_values(array_unique(array_merge(
+                        $existing_msl_addons,
+                        array_values(array_filter($new_treatment_names, function ($name) use ($main_service_msl) {
+                            return $name !== $main_service_msl;
+                        }))
+                    )));
+                } else {
+                    $main_service_msl = $new_treatment_names[0];
+                    if (count($new_treatment_names) > 1) {
+                        $subs_msl_addons = array_slice($new_treatment_names, 1);
+                    }
                 }
-                $names_count = max(1, count($array_treatment_names));
-                $price_individual = $this->prices_msl[$index] / $names_count;
-                foreach($array_treatment_names as $treatment_name){
+
+                $names_count = max(1, count($new_treatment_names));
+                $price_individual = $_total_msl > 0 ? (int)round($_total_msl / $names_count) : 0;
+                foreach ($new_treatment_names as $treatment_name) {
                     $subs_msl[$treatment_name] = $price_individual;
                 }
             }
@@ -2861,66 +2947,52 @@ class SubscriptionController extends AppPluginController {
             $requires_immediate_charge = $this->otSubscriptionRequiresImmediateCharge(
                 $is_other_schools,
                 $has_cancelled_subscription,
-                false
+                $is_iv_therapy
             );
             $charge_amount = $requires_immediate_charge ? (int) ($total_msl_total + $total_md_total) : 0;
             $stripe_refs = $this->createOtStripePaymentIntent($customer['id'], $payment_method, $charge_amount);
 
-            if ($requires_immediate_charge) {
-                if (!empty($stripe_refs['error'])) {
-                    $this->message('Your payment method is not valid. Add a new payment method and try again.');
-                    return;
-                }
-                if ($charge_amount > 0 && !$this->paymentIntentChargeSucceeded($stripe_refs['stripe_result'])) {
-                    $this->message('Your payment could not be completed. Add a new payment method and try again.');
-                    return;
-                }
+            $stripe_charge_error = $this->otStripeChargeFailedMessage($stripe_refs, $charge_amount);
+            if ($stripe_charge_error !== null) {
+                $this->message($stripe_charge_error);
+                return;
             }
 
             $msl_id = null;
             $md_id = null;
             $new_subscription_ids = [];
 
-            $s_entity = $this->DataSubscriptions->newEntity([
-                'uid'		=> $this->DataSubscriptions->new_uid(),
-                'event'		=> 'save_subscription',
-                'payload'	=> '',
-                'user_id'	=> USER_ID,
-                'request_id'	=> '',
-                'status' => 'ACTIVE',
-                'data_object_id' => '',
-                'customer_id' => $customer['id'],
-                'payment_method' => $payment_method,
-                'subscription_type' => 'SUBSCRIPTIONMSL',
-                'total' =>$_total_msl,
-                'subtotal' => $total_msl_total,
-                'promo_code' => get('promo_code',''),
-                'agreement_id' => 0,
-                'main_service' => $main_service_msl,
-                'addons_services' => $addon_services,
-                'payment_details' => json_encode($subs_msl),
-                'state' => USER_STATE,
-                'monthly' => '1',
-                'other_school' => $is_other_schools ? 1 : 0,
-            ]);
-
-            if ($s_entity->hasErrors()) {
-                $this->message('Could not create subscription.');
-                return;
-            }
-
-            $msl_id = $this->DataSubscriptions->save($s_entity);
-            if (empty($msl_id)) {
-                $this->message('Could not create subscription.');
-                return;
-            }
-            $new_subscription_ids[] = (int) $msl_id->id;
-            $this->set('msl_subscription_id', $msl_id->id);
-
-            if (count($subs_md) > 0) {
-                $md_addon_services = $this->normalize_addons_services(implode(',', $subs_md_addons));
-
-                $m_entity = $this->DataSubscriptions->newEntity([
+            if ($sub_active) {
+                $existing_payment_details = json_decode($ent_subscription_msl_active->payment_details, true);
+                if (!is_array($existing_payment_details)) {
+                    $existing_payment_details = [];
+                }
+                $merged_msl_addons = $ent_subscription_msl_active->addons_services ?? '';
+                foreach ($new_treatment_names as $name) {
+                    if ($name === $ent_subscription_msl_active->main_service) {
+                        continue;
+                    }
+                    $merged_msl_addons = empty($merged_msl_addons)
+                        ? $name
+                        : $merged_msl_addons . ',' . $name;
+                }
+                $ent_subscription_msl_active->addons_services = $this->normalize_addons_services($merged_msl_addons);
+                $ent_subscription_msl_active->payment_details = json_encode(array_merge($existing_payment_details, $subs_msl));
+                if ($new_msl_tier_total > 0) {
+                    $ent_subscription_msl_active->total = $new_msl_tier_total;
+                }
+                $ent_subscription_msl_active->payment_method = $payment_method;
+                $ent_subscription_msl_active->customer_id = $customer['id'];
+                $msl_id = $this->DataSubscriptions->save($ent_subscription_msl_active);
+                if (empty($msl_id)) {
+                    $this->message('Could not update subscription.');
+                    return;
+                }
+                $main_service_msl = $ent_subscription_msl_active->main_service;
+                $addon_services = $ent_subscription_msl_active->addons_services ?? '';
+                $this->set('msl_subscription_id', $msl_id->id);
+            } else {
+                $s_entity = $this->DataSubscriptions->newEntity([
                     'uid'		=> $this->DataSubscriptions->new_uid(),
                     'event'		=> 'save_subscription',
                     'payload'	=> '',
@@ -2930,32 +3002,107 @@ class SubscriptionController extends AppPluginController {
                     'data_object_id' => '',
                     'customer_id' => $customer['id'],
                     'payment_method' => $payment_method,
-                    'subscription_type' => 'SUBSCRIPTIONMD',
-                    'total' =>$_total_md,
-                    'subtotal' => $total_md_total,
+                    'subscription_type' => 'SUBSCRIPTIONMSL',
+                    'total' => $new_msl_tier_total > 0 ? $new_msl_tier_total : $_total_msl,
+                    'subtotal' => $total_msl_total,
                     'promo_code' => get('promo_code',''),
                     'agreement_id' => 0,
-                    'main_service' => $main_service_md,
-                    'addons_services' => $md_addon_services,
-                    'payment_details' => json_encode($subs_md),
+                    'main_service' => $main_service_msl,
+                    'addons_services' => $addon_services,
+                    'payment_details' => json_encode($subs_msl),
                     'state' => USER_STATE,
                     'monthly' => '1',
                     'other_school' => $is_other_schools ? 1 : 0,
                 ]);
 
-                if ($m_entity->hasErrors()) {
-                    $this->rollbackOtSubscriptionRows($new_subscription_ids);
+                if ($s_entity->hasErrors()) {
                     $this->message('Could not create subscription.');
                     return;
                 }
 
-                $md_id = $this->DataSubscriptions->save($m_entity);
-                if (empty($md_id)) {
-                    $this->rollbackOtSubscriptionRows($new_subscription_ids);
+                $msl_id = $this->DataSubscriptions->save($s_entity);
+                if (empty($msl_id)) {
                     $this->message('Could not create subscription.');
                     return;
                 }
-                $new_subscription_ids[] = (int) $md_id->id;
+                $new_subscription_ids[] = (int) $msl_id->id;
+                $this->set('msl_subscription_id', $msl_id->id);
+            }
+
+            if (count($subs_md) > 0) {
+                $md_addon_services = $this->normalize_addons_services(implode(',', $subs_md_addons));
+
+                if ($sub_active_md) {
+                    $existing_md_details = json_decode($ent_subscription_md_active->payment_details, true);
+                    if (!is_array($existing_md_details)) {
+                        $existing_md_details = [];
+                    }
+                    $merged_md_addons = $ent_subscription_md_active->addons_services ?? '';
+                    foreach (array_merge([$main_service_md], $subs_md_addons) as $name) {
+                        if ($name === '' || $name === $ent_subscription_md_active->main_service) {
+                            continue;
+                        }
+                        $merged_md_addons = empty($merged_md_addons)
+                            ? $name
+                            : $merged_md_addons . ',' . $name;
+                    }
+                    $ent_subscription_md_active->addons_services = $this->normalize_addons_services($merged_md_addons);
+                    $ent_subscription_md_active->payment_details = json_encode(array_merge($existing_md_details, $subs_md));
+                    $ent_subscription_md_active->total = (int)$ent_subscription_md_active->total + $total_md_total;
+                    $ent_subscription_md_active->payment_method = $payment_method;
+                    $ent_subscription_md_active->customer_id = $customer['id'];
+                    $md_id = $this->DataSubscriptions->save($ent_subscription_md_active);
+                    if (empty($md_id)) {
+                        if (!$sub_active) {
+                            $this->rollbackOtSubscriptionRows($new_subscription_ids);
+                        }
+                        $this->message('Could not update subscription.');
+                        return;
+                    }
+                    $main_service_md = $ent_subscription_md_active->main_service;
+                    $md_addon_services = $ent_subscription_md_active->addons_services ?? '';
+                } else {
+                    $m_entity = $this->DataSubscriptions->newEntity([
+                        'uid'		=> $this->DataSubscriptions->new_uid(),
+                        'event'		=> 'save_subscription',
+                        'payload'	=> '',
+                        'user_id'	=> USER_ID,
+                        'request_id'	=> '',
+                        'status' => 'ACTIVE',
+                        'data_object_id' => '',
+                        'customer_id' => $customer['id'],
+                        'payment_method' => $payment_method,
+                        'subscription_type' => 'SUBSCRIPTIONMD',
+                        'total' => $total_md_total,
+                        'subtotal' => $total_md_total,
+                        'promo_code' => get('promo_code',''),
+                        'agreement_id' => 0,
+                        'main_service' => $main_service_md,
+                        'addons_services' => $md_addon_services,
+                        'payment_details' => json_encode($subs_md),
+                        'state' => USER_STATE,
+                        'monthly' => '1',
+                        'other_school' => $is_other_schools ? 1 : 0,
+                    ]);
+
+                    if ($m_entity->hasErrors()) {
+                        if (!$sub_active) {
+                            $this->rollbackOtSubscriptionRows($new_subscription_ids);
+                        }
+                        $this->message('Could not create subscription.');
+                        return;
+                    }
+
+                    $md_id = $this->DataSubscriptions->save($m_entity);
+                    if (empty($md_id)) {
+                        if (!$sub_active) {
+                            $this->rollbackOtSubscriptionRows($new_subscription_ids);
+                        }
+                        $this->message('Could not create subscription.');
+                        return;
+                    }
+                    $new_subscription_ids[] = (int) $md_id->id;
+                }
                 $this->set('md_subscription_id', $md_id->id);
             }
 
@@ -2982,7 +3129,7 @@ class SubscriptionController extends AppPluginController {
                     $md_addon_services,
                     $subs_md,
                     $is_other_schools,
-                    false
+                    $is_iv_therapy
                 )) {
                     $this->rollbackOtSubscriptionRows($new_subscription_ids);
                     $this->message('Payment was processed but the subscription could not be finalized. Please contact support.');
@@ -5735,6 +5882,12 @@ class SubscriptionController extends AppPluginController {
                 $this->message('Your payment method is not valid. Add a new payment method and try again. ' .$error);
             }
         }else{
+            // Other schools (data_course_id): save_subscription_ot already matches get_ot_subscription_info and charges via Stripe
+            if ($is_other_schools) {
+                $this->save_subscription_ot();
+                return;
+            }
+
             $course_type = $this->CatCoursesType->find()
             ->select([
                 'name_key' => 'STOT.name_key',
@@ -5745,7 +5898,7 @@ class SubscriptionController extends AppPluginController {
                 'DCC' => ['table' => 'data_coverage_courses', 'type' => 'INNER', 'conditions' => 'DCC.course_type_id = CatCoursesType.id'],
                 'STOT' => ['table' => 'sys_treatments_ot', 'type' => 'INNER', 'conditions' => 'STOT.id = DCC.ot_id AND STOT.deleted = 0']
             ])
-            ->where(['CatCoursesType.name_key' => $data_training->level])->all();
+            ->where(['CatCoursesType.name_key' => $main_training_level])->all();
             
             $array_msl = [];
             $array_md = [];
@@ -12051,7 +12204,7 @@ if (isset($arr_subscriptions['membership_msl_iv'])) {
 
         ];
 
-        if (in_array($main_training_level, $levels, true)) {
+        if (in_array($main_training_level, $levels, true) && !$is_other_schools) {
             
             $_total_md = 0;
             $_total_msl = 0;
@@ -12601,53 +12754,56 @@ if (isset($arr_subscriptions['membership_msl_iv'])) {
                 }*/
             }
 
-            // Si el usuario tiene una suscripción cancelada para alguno de estos servicios, debe pagar
-            if($has_cancelled_subscription || $is_other_schools){
-                $content = '<p style="font-size: 28px; font-weight: bold; text-align: center;">Total due today and recurring monthly: $' . ($_total_md + $_total_msl) / 100 . '</p>';
+            if($sub_active){
+                $this->loadModel('SpaLiveV1.DataSubscriptionPayments');
+                $total_anterior = (int)$ent_subscription->total;
+                if($sub_active_md){
+                    $total_anterior += (int)$ent_subscription_md->total;
+                }
+                // $_total_msl is already the MSL tier delta; do not subtract ent_subscription->total again
+                $preview_total = $_total_md + $_total_msl;
+                $next_month_total = $total_anterior + $preview_total;
+                $next_month_date = FrozenTime::now()->addMonth();
+
+                if($has_cancelled_subscription || $is_other_schools){
+                    $content = '<p style="font-size: 28px; font-weight: bold; text-align: center;">Total due today: $' . number_format($preview_total / 100, 2) . '</p>';
+                    $content .= '<p style="font-size: 20px; font-weight: bold; text-align: center;">Total per month after that: $' . number_format($next_month_total / 100, 2) . '</p>';
+                }else{
+                    $ent_payments_subscription = $this->DataSubscriptionPayments->find()
+                        ->where([
+                            'DataSubscriptionPayments.subscription_id' => $ent_subscription->id,
+                            'DataSubscriptionPayments.status'  => 'DONE',
+                            'DataSubscriptionPayments.user_id' => USER_ID,
+                            'DataSubscriptionPayments.payment_type' => 'FULL',
+                            'DataSubscriptionPayments.deleted' => 0
+                        ])
+                        ->order(['DataSubscriptionPayments.created' => 'DESC'])
+                        ->first();
+
+                    $calculated_date = empty($ent_payments_subscription)
+                        ? $ent_subscription->created
+                        : $ent_payments_subscription->created;
+
+                    $now  = FrozenTime::now();
+                    $diff = $now->diff($calculated_date);
+                    $days = $diff->days;
+
+                    $amount = intval(((30 - $days) * $preview_total) / 30);
+                    if($amount < 100){
+                        $amount = 100;
+                    }
+                    $prorrated_amount = $preview_total - $amount;
+
+                    $content = '<p style="font-size: 28px; font-weight: bold; text-align: center;">Total due today $0</p>';
+                    $content .= '<p style="font-size: 28px; font-weight: bold; text-align: center;">The first month is free</p>';
+                    $content .= '<p style="font-size: 20px; font-weight: bold; text-align: center;">Total due on ' . date('m-d-Y', strtotime($next_month_date->i18nFormat('dd-MM-yyyy'))) . ': $' . number_format($prorrated_amount / 100, 2) . '</p>';
+                    $content .= '<p style="font-size: 20px; font-weight: bold; text-align: center;">Total per month after that: $' . number_format($next_month_total / 100, 2) . '</p>';
+                }
+            }elseif($has_cancelled_subscription || $is_other_schools){
+                $content = '<p style="font-size: 28px; font-weight: bold; text-align: center;">Total due today and recurring monthly: $' . number_format(($_total_md + $_total_msl) / 100, 2) . '</p>';
             }else{
                 $content = '<p style="font-size: 28px; font-weight: bold; text-align: center;">Total due today $0</p>';
                 $content .= '<p style="font-size: 28px; font-weight: bold; text-align: center;">The first month is free</p>';
-            }
-
-            if($sub_active){
-                $this->loadModel('SpaLiveV1.DataSubscriptionPayments');
-                $ent_payments_subscription = $this->DataSubscriptionPayments->find()
-                    ->where([
-                        'DataSubscriptionPayments.subscription_id' => $ent_subscription->id,
-                        'DataSubscriptionPayments.status'  => 'DONE',
-                        'DataSubscriptionPayments.user_id' => USER_ID,
-                        'DataSubscriptionPayments.payment_type' => 'FULL',
-                        'DataSubscriptionPayments.deleted' => 0
-                    ])
-                    ->order(['DataSubscriptionPayments.created' => 'DESC'])
-                    ->first();
-                
-                $calculated_date = empty($ent_payments_subscription)
-                    ? $ent_subscription->created
-                    : $ent_payments_subscription->created;
-
-                $now  = FrozenTime::now();
-                $diff = $now->diff($calculated_date);
-                $days = $diff->days;
-                $expiration_date = $calculated_date->addMonth();
-                $next_month_date = $now->addMonth();
-
-                $total_anterior = $ent_subscription->total;
-                if($sub_active_md){
-                    $total_anterior += $ent_subscription_md->total;
-                }
-                $preview_total = $_total_md + ($_total_msl - $ent_subscription->total);
-
-                $next_month_total = $total_anterior + $preview_total;
-
-                $amount = intval(((30 - $days) * $preview_total) / 30);
-
-                if($amount < 100){
-                    $amount = 100;
-                }
-
-                $content .= '<p style="font-size: 20px; font-weight: bold; text-align: center;">Total due on ' . date('m-d-Y', strtotime($next_month_date->i18nFormat('dd-MM-yyyy'))) . ': $' . number_format($amount/100, 2) . '</p>';
-                $content .= '<p style="font-size: 20px; font-weight: bold; text-align: center;">Total per month after that: $' . number_format($next_month_total/100, 2) . '</p>';
             }
 
         }
