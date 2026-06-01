@@ -1615,6 +1615,7 @@ class MainController extends AppPluginController {
         $email_string = "";
         $email_array = array();
         $pending_list_526_phones = array();
+        $peptide_distribution_phones = array();
         $field_valid = $is_email ? '(DNS.allow_email IS NULL OR DNS.allow_email = 1)' :
                        ($is_sms ? '(DNS.allow_sms IS NULL OR DNS.allow_sms = 1)' : '(DNS.allow_push IS NULL OR DNS.allow_push = 1)');
         $SU = array();
@@ -1710,6 +1711,55 @@ class MainController extends AppPluginController {
                 if ($phoneE164 !== null && !isset($phonesSeen[$phoneE164])) {
                     $phonesSeen[$phoneE164] = true;
                     $pending_list_526_phones[] = $phoneE164;
+                }
+            }
+        } else if ($type == 'PEPTIDE DISTRIBUTION') {
+            // Full filtered_list; exclude rows that match peptide_distributors (email or phone).
+            $conn = $this->SysUsers->getConnection();
+            $distributorEmails = array();
+            $distributorPhones = array();
+            $distributorRows = $conn->execute(
+                'SELECT Email, Phone FROM peptide_distributors'
+            )->fetchAll('assoc');
+            foreach ($distributorRows as $pdRow) {
+                $pdEmail = isset($pdRow['Email']) ? strtolower(trim((string)$pdRow['Email'])) : '';
+                if ($pdEmail !== '') {
+                    $distributorEmails[$pdEmail] = true;
+                }
+                $pdPhone = $this->normalizeBulkSmsPhoneNumber(isset($pdRow['Phone']) ? $pdRow['Phone'] : '');
+                if ($pdPhone !== null) {
+                    $distributorPhones[$pdPhone] = true;
+                }
+            }
+
+            $rawRows = $conn->execute(
+                "SELECT DISTINCT Email, Phone FROM filtered_list
+                WHERE (`Email` IS NOT NULL AND TRIM(Email) <> '' OR Phone IS NOT NULL AND TRIM(Phone) <> '')"
+            )->fetchAll('assoc');
+
+            $phonesSeen = array();
+            foreach ($rawRows as $row) {
+                $email = isset($row['Email']) ? trim((string)$row['Email']) : '';
+                $emailKey = strtolower($email);
+                $phoneE164 = $this->normalizeBulkSmsPhoneNumber(isset($row['Phone']) ? $row['Phone'] : '');
+
+                $isDistributor = ($emailKey !== '' && isset($distributorEmails[$emailKey]))
+                    || ($phoneE164 !== null && isset($distributorPhones[$phoneE164]));
+                if ($isDistributor) {
+                    continue;
+                }
+
+                if ($email !== '' && filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                    $ent_user[] = [
+                        'id' => $email,
+                        'email' => $email,
+                        'name' => '',
+                        'lname' => '',
+                    ];
+                }
+                if ($phoneE164 !== null && !isset($phonesSeen[$phoneE164])) {
+                    $phonesSeen[$phoneE164] = true;
+                    $peptide_distribution_phones[] = $phoneE164;
                 }
             }
         } else if($type == 'INJECTOR BOOKED BASIC TRAINING'){
@@ -2074,6 +2124,8 @@ class MainController extends AppPluginController {
         foreach ($ent_user as $row) {
             if ($type == 'PENDING LIST 5_26') {
                 $users_array[] = $row['email'];
+            } else if ($type == 'PEPTIDE DISTRIBUTION') {
+                $users_array[] = $row['email'];
             } else {
                 $users_array[] = $row['id'];
             }
@@ -2094,6 +2146,24 @@ class MainController extends AppPluginController {
 
         if ($type == 'PENDING LIST 5_26' && (int)$is_sms === 0 && (int)$is_email === 0) {
             $this->message('PENDING LIST 5_26 requires email or SMS.');
+            return;
+        }
+
+        if ($type == 'PEPTIDE DISTRIBUTION' && (int)$is_sms === 1 && (int)$is_email === 0) {
+            $this->sendBulkSmsToPhoneNumbers($body, $peptide_distribution_phones);
+            $is_dev = env('IS_DEV', false);
+            if (!$is_dev) {
+                $this->send_email_after_register(
+                    'myspa@myspalive.com, cora@advantedigital.com',
+                    'bulk notification',
+                    $body . '</br></br> Number of SMS recipients: ' . count($peptide_distribution_phones)
+                );
+            }
+            return;
+        }
+
+        if ($type == 'PEPTIDE DISTRIBUTION' && (int)$is_sms === 0 && (int)$is_email === 0) {
+            $this->message('PEPTIDE DISTRIBUTION requires email or SMS.');
             return;
         }
 
