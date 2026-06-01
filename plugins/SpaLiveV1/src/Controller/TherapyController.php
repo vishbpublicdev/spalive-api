@@ -2075,6 +2075,8 @@ class TherapyController extends AppPluginController {
     public function send_email_iv_therapy_app(){
         $message = get('message', '');
         $user_id = get('user_id', 0);
+
+        return;
         /* $contains = get('contains', array());
 
         if ($contains != '[]') {
