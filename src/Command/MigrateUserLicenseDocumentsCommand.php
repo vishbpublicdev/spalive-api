@@ -26,6 +26,10 @@ use Throwable;
  * Config: config/migration_sys_users.php
  * Run:    bin/cake migrate_user_license_documents [--dry-run] [--batch=100]
  * Rollback: bin/cake rollback_user_license_migration
+ *
+ * Migrates rows with front/back images (upload to storage) and rows with no images
+ * (metadata only: type, number, state, dates, status; null document URLs).
+ * Already-imported legacy ids are not changed.
  */
 class MigrateUserLicenseDocumentsCommand extends Command
 {
@@ -117,6 +121,13 @@ class MigrateUserLicenseDocumentsCommand extends Command
             return static::CODE_ERROR;
         }
 
+        if (!$dryRun) {
+            // Supabase default statement_timeout can abort map inserts while waiting on locks
+            // left by a Ctrl+C mid-batch. 0 = no limit for this session (migration only).
+            $stmtTimeoutMs = (int)($cfg['target']['statement_timeout_ms'] ?? 0);
+            $target->exec('SET statement_timeout = ' . ($stmtTimeoutMs <= 0 ? '0' : (string)$stmtTimeoutMs));
+        }
+
         $legacyStartCol = $this->detectLegacyLicenceStartDateColumn($legacy);
         $targetStartCol = $this->detectTargetProviderLicensesStartDateColumn($target);
         if ($legacyStartCol !== null && $targetStartCol !== null) {
@@ -166,6 +177,7 @@ class MigrateUserLicenseDocumentsCommand extends Command
 
         $examined = 0;
         $licencesCreated = 0;
+        $licencesMetadataOnly = 0;
         $filesUploaded = 0;
         $skipped = 0;
         $stop = false;
@@ -174,10 +186,6 @@ class MigrateUserLicenseDocumentsCommand extends Command
             $rows = $this->fetchLicenceBatch($legacy, $lastId, $batch, $legacyStartCol);
             if ($rows === []) {
                 break;
-            }
-
-            if (!$dryRun) {
-                $target->beginTransaction();
             }
 
             try {
@@ -189,12 +197,18 @@ class MigrateUserLicenseDocumentsCommand extends Command
                     $legacyUserId = (int)($row['user_id'] ?? 0);
                     if ($legacyUserId <= 0) {
                         $skipped++;
+                        if (!$dryRun) {
+                            $this->checkpointSet($target, $checkpointKey, $licenceId);
+                        }
                         continue;
                     }
 
                     $providerId = $this->resolveProviderId($target, $legacyUserId);
                     if ($providerId === null) {
                         $skipped++;
+                        if (!$dryRun) {
+                            $this->checkpointSet($target, $checkpointKey, $licenceId);
+                        }
                         continue;
                     }
 
@@ -262,11 +276,11 @@ class MigrateUserLicenseDocumentsCommand extends Command
                         $filesUploaded++;
                     }
 
-                    if ($uploaded === []) {
-                        if (!$force && $this->providerLicenseExistsForLegacy($target, $licenceId)) {
-                            $skipped++;
-                        } else {
-                            $skipped++;
+                    $metadataOnly = $uploaded === [];
+                    if ($metadataOnly && !$force && $this->legacyLicenceAlreadyMigrated($target, $licenceId)) {
+                        $skipped++;
+                        if (!$dryRun) {
+                            $this->checkpointSet($target, $checkpointKey, $licenceId);
                         }
                         if ($maxRows > 0 && $examined >= $maxRows) {
                             $stop = true;
@@ -276,59 +290,60 @@ class MigrateUserLicenseDocumentsCommand extends Command
 
                     $documentUrlFront = $uploaded['front']['url'] ?? null;
                     $documentUrlBack = $uploaded['back']['url'] ?? null;
-                    $adminNotes = 'Legacy import licence #' . $licenceId;
-
                     $isPrimary = !$this->providerTrackHasPrimary($target, $providerId, $track);
 
-                    if ($dryRun) {
-                        $licencesCreated++;
-                    } else {
-                        $existingPlId = $this->mappedProviderLicenseId($target, $licenceId);
-                        if ($existingPlId === null) {
-                            $existingPlId = $this->insertProviderLicense(
-                                $target,
-                                $providerId,
-                                $track,
-                                $licenseType,
-                                $licenseNumber,
-                                $state,
-                                $startDate,
-                                $expiration,
-                                $documentUrlFront,
-                                $documentUrlBack,
-                                $verification,
-                                $isPrimary,
-                                $adminNotes,
-                                $targetStartCol
-                            );
+                    // Short DB transaction per licence (uploads run outside txn) so Ctrl+C
+                    // does not hold locks across a whole batch + HTTP storage calls.
+                    if (!$dryRun) {
+                        $target->beginTransaction();
+                    }
+
+                    try {
+                        $inserted = $this->persistProviderLicense(
+                            $target,
+                            $licenceId,
+                            $providerId,
+                            $track,
+                            $licenseType,
+                            $licenseNumber,
+                            $state,
+                            $startDate,
+                            $expiration,
+                            $documentUrlFront,
+                            $documentUrlBack,
+                            $verification,
+                            $isPrimary,
+                            $bucket,
+                            $targetStartCol,
+                            $dryRun,
+                            $metadataOnly,
+                            $uploaded
+                        );
+
+                        if ($inserted) {
                             $licencesCreated++;
-                        } else {
-                            $this->updateProviderLicenseDocument(
-                                $target,
-                                $existingPlId,
-                                $documentUrlFront,
-                                $documentUrlBack,
-                                $adminNotes,
-                                $verification,
-                                $startDate,
-                                $targetStartCol
-                            );
+                            if ($metadataOnly) {
+                                $licencesMetadataOnly++;
+                            }
+                        } elseif ($metadataOnly) {
+                            $skipped++;
                         }
 
-                        foreach ($uploaded as $side => $meta) {
-                            $this->mapInsert($target, $licenceId, $side, $existingPlId, $bucket, $meta['path']);
+                        if (!$dryRun) {
+                            $target->commit();
+                            $this->checkpointSet($target, $checkpointKey, $licenceId);
                         }
+                    } catch (Throwable $rowEx) {
+                        if (!$dryRun && $target->inTransaction()) {
+                            $target->rollBack();
+                        }
+                        throw $rowEx;
                     }
 
                     if ($maxRows > 0 && $examined >= $maxRows) {
                         $stop = true;
                         break;
                     }
-                }
-
-                if (!$dryRun) {
-                    $target->commit();
-                    $this->checkpointSet($target, $checkpointKey, $lastId);
                 }
             } catch (Throwable $e) {
                 if (!$dryRun && $target->inTransaction()) {
@@ -339,16 +354,25 @@ class MigrateUserLicenseDocumentsCommand extends Command
                 return static::CODE_ERROR;
             }
 
-            $io->out("progress examined={$examined} licences={$licencesCreated} files={$filesUploaded} skipped={$skipped} last_id={$lastId}");
+            $io->out(sprintf(
+                'progress examined=%d licences=%d metadata_only=%d files=%d skipped=%d last_id=%d',
+                $examined,
+                $licencesCreated,
+                $licencesMetadataOnly,
+                $filesUploaded,
+                $skipped,
+                $lastId
+            ));
             if ($stop) {
                 break;
             }
         }
 
         $io->success(sprintf(
-            'Phase C done. examined=%d licences=%d files=%d skipped=%d checkpoint_licence_id=%d',
+            'Phase C done. examined=%d licences=%d metadata_only=%d files=%d skipped=%d checkpoint_licence_id=%d',
             $examined,
             $licencesCreated,
+            $licencesMetadataOnly,
             $filesUploaded,
             $skipped,
             $lastId
@@ -400,7 +424,25 @@ class MigrateUserLicenseDocumentsCommand extends Command
         $st->execute([':uid' => $legacyUserId]);
         $id = $st->fetchColumn();
 
-        return $id ? (string)$id : null;
+        if (!$id) {
+            return null;
+        }
+
+        $providerId = (string)$id;
+
+        // Guardrail: provider_licenses.provider_id should be user_profiles.id (profile UUID).
+        // If the map contains an auth user UUID (user_profiles.user_id), translate it.
+        $st = $target->prepare('SELECT 1 FROM public.user_profiles WHERE id = :id::uuid LIMIT 1');
+        $st->execute([':id' => $providerId]);
+        if ($st->fetchColumn()) {
+            return $providerId;
+        }
+
+        $st = $target->prepare('SELECT id::text FROM public.user_profiles WHERE user_id = :uid::uuid LIMIT 1');
+        $st->execute([':uid' => $providerId]);
+        $translated = $st->fetchColumn();
+
+        return $translated ? (string)$translated : $providerId;
     }
 
     private function mapExists(PDO $target, int $licenceId, string $side): bool
@@ -431,7 +473,142 @@ class MigrateUserLicenseDocumentsCommand extends Command
 
     private function providerLicenseExistsForLegacy(PDO $target, int $licenceId): bool
     {
-        return $this->mappedProviderLicenseId($target, $licenceId) !== null;
+        return $this->legacyLicenceAlreadyMigrated($target, $licenceId);
+    }
+
+    private function legacyLicenceAlreadyMigrated(PDO $target, int $licenceId): bool
+    {
+        if ($this->mappedProviderLicenseId($target, $licenceId) !== null) {
+            return true;
+        }
+
+        return $this->providerLicenseIdByAdminNotes($target, $licenceId) !== null;
+    }
+
+    private function legacyAdminNotes(int $licenceId): string
+    {
+        return 'Legacy import licence #' . $licenceId;
+    }
+
+    private function providerLicenseIdByAdminNotes(PDO $target, int $licenceId): ?string
+    {
+        $st = $target->prepare(
+            'SELECT id::text FROM public.provider_licenses WHERE admin_notes = :notes LIMIT 1'
+        );
+        $st->execute([':notes' => $this->legacyAdminNotes($licenceId)]);
+        $id = $st->fetchColumn();
+
+        return $id ? (string)$id : null;
+    }
+
+    private function findProviderLicenseByCredential(
+        PDO $target,
+        string $providerId,
+        string $licenseType,
+        string $licenseNumber,
+        string $state
+    ): ?string {
+        $st = $target->prepare(
+            'SELECT id::text FROM public.provider_licenses
+             WHERE provider_id = :provider_id::uuid
+               AND license_type = :license_type
+               AND license_number = :license_number
+               AND state = :state
+             ORDER BY created_at ASC
+             LIMIT 1'
+        );
+        $st->execute([
+            ':provider_id' => $providerId,
+            ':license_type' => $licenseType,
+            ':license_number' => $licenseNumber,
+            ':state' => $state,
+        ]);
+        $id = $st->fetchColumn();
+
+        return $id ? (string)$id : null;
+    }
+
+    /**
+     * @param array<string, array{path: string, url: string, mime: string}> $uploaded
+     */
+    private function persistProviderLicense(
+        PDO $target,
+        int $licenceId,
+        string $providerId,
+        string $track,
+        string $licenseType,
+        string $licenseNumber,
+        string $state,
+        ?string $startDate,
+        ?string $expiration,
+        ?string $documentUrlFront,
+        ?string $documentUrlBack,
+        string $verification,
+        bool $isPrimary,
+        string $bucket,
+        ?string $targetStartDateColumn,
+        bool $dryRun,
+        bool $metadataOnly,
+        array $uploaded
+    ): bool {
+        $adminNotes = $this->legacyAdminNotes($licenceId);
+
+        $existingPlId = $this->mappedProviderLicenseId($target, $licenceId)
+            ?? $this->providerLicenseIdByAdminNotes($target, $licenceId)
+            ?? $this->findProviderLicenseByCredential($target, $providerId, $licenseType, $licenseNumber, $state);
+
+        if ($existingPlId !== null && $metadataOnly) {
+            if (!$dryRun && !$this->mapExists($target, $licenceId, 'front')) {
+                $this->mapInsert($target, $licenceId, 'front', $existingPlId, $bucket, '__metadata_only__');
+            }
+
+            return false;
+        }
+
+        if ($dryRun) {
+            return $existingPlId === null;
+        }
+
+        $inserted = false;
+        if ($existingPlId === null) {
+            $existingPlId = $this->insertProviderLicense(
+                $target,
+                $providerId,
+                $track,
+                $licenseType,
+                $licenseNumber,
+                $state,
+                $startDate,
+                $expiration,
+                $documentUrlFront,
+                $documentUrlBack,
+                $verification,
+                $isPrimary,
+                $adminNotes,
+                $targetStartDateColumn
+            );
+            $inserted = true;
+        } elseif (!$metadataOnly) {
+            $this->updateProviderLicenseDocument(
+                $target,
+                $existingPlId,
+                $documentUrlFront,
+                $documentUrlBack,
+                $adminNotes,
+                $verification,
+                $startDate,
+                $targetStartDateColumn
+            );
+        }
+
+        foreach ($uploaded as $side => $meta) {
+            $this->mapInsert($target, $licenceId, $side, $existingPlId, $bucket, $meta['path']);
+        }
+        if ($metadataOnly && !$this->mapExists($target, $licenceId, 'front')) {
+            $this->mapInsert($target, $licenceId, 'front', $existingPlId, $bucket, '__metadata_only__');
+        }
+
+        return $inserted;
     }
 
     private function providerTrackHasPrimary(PDO $target, string $providerId, string $track): bool
@@ -690,8 +867,8 @@ class MigrateUserLicenseDocumentsCommand extends Command
         }
         $st = $target->prepare(
             'UPDATE public.provider_licenses SET
-                document_url_front = :document_url_front,
-                document_url_back = :document_url_back,
+                document_url_front = COALESCE(:document_url_front, document_url_front),
+                document_url_back = COALESCE(:document_url_back, document_url_back),
                 admin_notes = COALESCE(:admin_notes, admin_notes),
                 verification_status = :verification_status,
                 updated_at = now()' . $startDateSet . '
