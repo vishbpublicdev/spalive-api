@@ -7754,8 +7754,12 @@ class SummaryController extends AppPluginController{
                 $status = $ServicesHelper->service_status(
                     $search_helper,                
                 );  // NOT_STARTED, WAITING, STUDYING, REJECTED, MSL, MD, DONE, SUBSCRIBE
-                
-                
+
+                // App expects SUBSCRIBE (unified flow), not legacy MSL/MD step labels
+                if (in_array($status, ['MSL', 'MD'], true)) {
+                    $status = 'SUBSCRIBE';
+                }
+
                 if ($status == 'SUBSCRIBE') {
                     $cat_key = $service_type['cat_key'];
                     
