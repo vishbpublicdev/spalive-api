@@ -65,6 +65,7 @@ class ServicesHelper {
 
     /**
      * True if injector may set CI price: non-OT rows or require_mdsub=0, or full eligibility (incl. MD when required).
+     * Filler (and other non-neurotoxin) catalog rows are not gated by neurotoxin MD subscription.
      */
     public function injector_may_set_price_for_ci_treatment($ci_treatment_id)
     {
@@ -559,7 +560,15 @@ class ServicesHelperData extends AppPluginController
             $status_for_purchase = 'NOT_STARTED';
             $Course = new CourseController();
 
-            $training = $Course->get_training_for_services($user_id, 'LEVEL 3 FILLERS');
+            // Legacy LEVEL 3 FILLERS plus new cat_trainings.level keys (FILLER_COURSE_LEVEL_1 / _2).
+            $training = null;
+            foreach (['FILLER_COURSE_LEVEL_2', 'FILLER_COURSE_LEVEL_1', 'LEVEL 3 FILLERS'] as $fillerLevel) {
+                $t = $Course->get_training_for_services($user_id, $fillerLevel);
+                if (!empty($t)) {
+                    $training = $t;
+                    break;
+                }
+            }
             $purchased      = $this->has_purchased_neurotoxins($user_id, 'FILLERS COURSE');
             if(!empty($training)){
             
@@ -892,7 +901,11 @@ class ServicesHelperData extends AppPluginController
     {
         $this->loadModel('SpaLiveV1.CatTreatmentsCi');
         $ent = $this->CatTreatmentsCi->find()
-            ->select(['name_key' => 'STOT.name_key', 'require_mdsub' => 'STOT.require_mdsub'])
+            ->select([
+                'name_key' => 'STOT.name_key',
+                'require_mdsub' => 'STOT.require_mdsub',
+                'type_trmt' => 'CT.type_trmt',
+            ])
             ->join([
                 'CT' => ['table' => 'cat_treatments', 'type' => 'LEFT', 'conditions' => 'CT.id = CatTreatmentsCi.treatment_id AND CT.deleted = 0'],
                 'STOT' => ['table' => 'sys_treatments_ot', 'type' => 'LEFT', 'conditions' => 'STOT.id = CT.other_treatment_id AND STOT.deleted = 0'],
@@ -900,7 +913,16 @@ class ServicesHelperData extends AppPluginController
             ->where(['CatTreatmentsCi.id' => $ci_treatment_id, 'CatTreatmentsCi.deleted' => 0])
             ->first();
 
-        if ($ent === null || $ent->name_key === null || $ent->name_key === '' || (int)$ent->require_mdsub !== 1) {
+        if ($ent === null) {
+            return true;
+        }
+
+        // MD subscription gating applies to neurotoxin CI catalog only, not fillers / flip / lift.
+        if ($ent->type_trmt !== null && $ent->type_trmt !== '' && (string)$ent->type_trmt !== 'NEUROTOXINS') {
+            return true;
+        }
+
+        if ($ent->name_key === null || $ent->name_key === '' || (int)$ent->require_mdsub !== 1) {
             return true;
         }
 

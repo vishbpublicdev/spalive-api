@@ -41,6 +41,16 @@ class FillersController extends AppPluginController {
 
     private $allowed_license_types = ['RN', 'NP', 'PA', 'MD'];
 
+    /** `cat_body_areas.id` for lips (FILLER_COURSE_LEVEL_1 CI catalog only). */
+    private const FILLER_COURSE_LEVEL1_BODY_AREA_ID = 2;
+
+    /** `cat_ci_treatments.name` / exam display names allowed for FILLER_COURSE_LEVEL_1 (case-insensitive). */
+    private const FILLER_COURSE_LEVEL1_CI_TREATMENT_NAMES = [
+        'Revanesse Lips + with lidocaine',
+        'Juvederm Ultra',
+        'Juvederm Volbella',
+    ];
+
     #region VARIABLES
 
 	public function initialize() : void {
@@ -205,15 +215,199 @@ class FillersController extends AppPluginController {
                 ->where(['DataTrainings.user_id' => $user_id,'DataTrainings.deleted' => 0,'DataTrainings.attended' => 1,'CatTrainings.deleted' => 0,'STOT.name_key' => 'FILLERS'])
                 ->first();
 
-                if(!empty($user_course_basic)){
+            if(!empty($user_course_basic)){
+                $has_certificate = true;
+            } else {
+                $level3Fillers = $this->DataTrainings->find()
+                    ->join([
+                        'CatTrainings' => [
+                            'table' => 'cat_trainings',
+                            'type' => 'INNER',
+                            'conditions' => 'CatTrainings.id = DataTrainings.training_id',
+                        ],
+                    ])
+                    ->select(['DataTrainings.id'])
+                    ->where([
+                        'DataTrainings.user_id' => $user_id,
+                        'DataTrainings.deleted' => 0,
+                        'DataTrainings.attended' => 1,
+                        'CatTrainings.deleted' => 0,
+                        'CatTrainings.level IN' => ['LEVEL 3 FILLERS', 'FILLER_COURSE_LEVEL_1', 'FILLER_COURSE_LEVEL_2'],
+                    ])
+                    ->order(['DataTrainings.id' => 'DESC'])
+                    ->first();
+
+                if (!empty($level3Fillers)) {
                     $has_certificate = true;
                 }
+            }
         }
 
         return $has_certificate;
     }
 
-   public function valid_step_application(
+    /**
+     * Restricted CI fillers catalog: only users whose only attended fillers *class* is
+     * FILLER_COURSE_LEVEL_1 (lips body area + three products). Legacy LEVEL 3 FILLERS,
+     * FILLER_COURSE_LEVEL_2, school FILLERS, and dynamic OT fillers track keep full areas + full list.
+     */
+    public function fillersCiAccessIsRestricted($user_id): bool
+    {
+        if ($this->hasSchoolFillersCertificate($user_id)) {
+            return false;
+        }
+        if ($this->hasDynamicOtFillersTraining($user_id)) {
+            return false;
+        }
+        if ($this->hasAttendedCatTrainingLevel($user_id, 'LEVEL 3 FILLERS')) {
+            return false;
+        }
+        if ($this->hasAttendedCatTrainingLevel($user_id, 'FILLER_COURSE_LEVEL_2')) {
+            return false;
+        }
+
+        return $this->hasAttendedCatTrainingLevel($user_id, 'FILLER_COURSE_LEVEL_1');
+    }
+
+    private function hasSchoolFillersCertificate($user_id): bool
+    {
+        $this->loadModel('SpaLiveV1.DataCourses');
+        $certificate = $this->DataCourses
+            ->find()
+            ->join([
+                'CatCourses' => [
+                    'table' => 'cat_courses',
+                    'type' => 'INNER',
+                    'conditions' => 'CatCourses.id = DataCourses.course_id',
+                ],
+            ])
+            ->select(['DataCourses.id'])
+            ->where([
+                'DataCourses.user_id' => $user_id,
+                'CatCourses.type' => 'FILLERS',
+                'DataCourses.status' => 'DONE',
+                'DataCourses.deleted' => 0,
+            ])
+            ->order(['DataCourses.id' => 'DESC'])
+            ->first();
+
+        return !empty($certificate);
+    }
+
+    private function hasDynamicOtFillersTraining($user_id): bool
+    {
+        $this->loadModel('SpaLiveV1.DataTrainings');
+        $user_course_basic = $this->DataTrainings->find()
+            ->join([
+                'CatTrainings' => ['table' => 'cat_trainings', 'type' => 'INNER', 'conditions' => 'CatTrainings.id = DataTrainings.training_id'],
+                'CTC' => ['table' => 'cat_courses_type', 'type' => 'INNER', 'conditions' => 'CTC.name_key = CatTrainings.level'],
+                'DCC' => ['table' => 'data_coverage_courses', 'type' => 'INNER', 'conditions' => 'DCC.course_type_id = CTC.id'],
+                'STOT' => ['table' => 'sys_treatments_ot', 'type' => 'INNER', 'conditions' => 'STOT.id = DCC.ot_id'],
+            ])
+            ->where([
+                'DataTrainings.user_id' => $user_id,
+                'DataTrainings.deleted' => 0,
+                'DataTrainings.attended' => 1,
+                'CatTrainings.deleted' => 0,
+                'STOT.name_key' => 'FILLERS',
+            ])
+            ->first();
+
+        return !empty($user_course_basic);
+    }
+
+    private function hasAttendedCatTrainingLevel($user_id, string $level): bool
+    {
+        $this->loadModel('SpaLiveV1.DataTrainings');
+        $row = $this->DataTrainings->find()
+            ->join([
+                'CatTrainings' => [
+                    'table' => 'cat_trainings',
+                    'type' => 'INNER',
+                    'conditions' => 'CatTrainings.id = DataTrainings.training_id',
+                ],
+            ])
+            ->select(['DataTrainings.id'])
+            ->where([
+                'DataTrainings.user_id' => $user_id,
+                'DataTrainings.deleted' => 0,
+                'DataTrainings.attended' => 1,
+                'CatTrainings.deleted' => 0,
+                'CatTrainings.level' => $level,
+            ])
+            ->first();
+
+        return !empty($row);
+    }
+
+    /**
+     * FILLER_COURSE_LEVEL_1: only body area id 2 (lips) from `cat_body_areas`.
+     *
+     * @param iterable|\Cake\Datasource\ResultSetInterface|array $body_areas
+     * @return array
+     */
+    public function filterBodyAreasFillersToLipsOnly($body_areas): array
+    {
+        $list = is_array($body_areas) ? $body_areas : iterator_to_array($body_areas);
+        $out = [];
+        foreach ($list as $area) {
+            $id = null;
+            if (is_array($area)) {
+                $id = $area['id'] ?? null;
+            } elseif (is_object($area) && isset($area->id)) {
+                $id = $area->id;
+            }
+            if ((int)$id === self::FILLER_COURSE_LEVEL1_BODY_AREA_ID) {
+                $out[] = $area;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * FILLER_COURSE_LEVEL_1: only CI rows whose treatment or exam name matches the allowed list.
+     *
+     * @param array<int, array<string, mixed>> $rows
+     * @return array<int, array<string, mixed>>
+     */
+    public function filterFillersCiTreatmentsForLevel1Course(array $rows): array
+    {
+        if ($rows === []) {
+            return [];
+        }
+        $allowed = [];
+        foreach (self::FILLER_COURSE_LEVEL1_CI_TREATMENT_NAMES as $n) {
+            $allowed[] = strtolower(trim($n));
+        }
+
+        return array_values(array_filter($rows, function ($r) use ($allowed) {
+            $candidates = [
+                strtolower(trim((string)($r['name'] ?? ''))),
+                strtolower(trim((string)($r['exam_name'] ?? ''))),
+            ];
+            foreach ($candidates as $c) {
+                if ($c !== '' && in_array($c, $allowed, true)) {
+                    return true;
+                }
+            }
+
+            return false;
+        }));
+    }
+
+    /**
+     * Shop inventory for users with only FILLER_COURSE_LEVEL_1: product `name` must match
+     * {@see FILLER_COURSE_LEVEL1_CI_TREATMENT_NAMES} (same rules as CI filter, no cat_treatments_ci lookup).
+     */
+    public function shopFillerProductAllowedForLevel1Catalog(string $productName): bool
+    {
+        return $this->filterFillersCiTreatmentsForLevel1Course([
+            ['name' => $productName, 'exam_name' => ''],
+        ]) !== [];
+    }
+
+    public function valid_step_application(
         $user_id
     ){
         $this->loadModel("SpaLiveV1.DataCourses");
@@ -241,7 +435,7 @@ class FillersController extends AppPluginController {
         if (empty($aplication)) {
 
             $_where = [];
-            $_where['CatTrainings.level']       = 'LEVEL 3 FILLERS';
+            $_where['CatTrainings.level IN']   = ['LEVEL 3 FILLERS', 'FILLER_COURSE_LEVEL_1'];
             $_where['DataTrainings.user_id']   = $user_id;
             $_where['DataTrainings.deleted']   = 0;
             $application = $this->DataTrainings

@@ -288,10 +288,33 @@ class MailchimpCommand extends Command{
         }*/   
 
         //$this->log(__LINE__ . ' ' . json_encode($ent_user));
-        $ent_user = $this->SysUsers->find()->select(['SysUsers.id','SysUsers.email','SysUsers.name','SysUsers.lname'])
-            ->where(
-                ['SysUsers.id in ' => $users])            
-            ->toArray(); 
+        $ent_user = [];
+        $usersArray = is_array($users) ? $users : [];
+        $usersAreEmails = false;
+        if (!empty($usersArray)) {
+            $first = $usersArray[0];
+            $usersAreEmails = is_string($first) && filter_var($first, FILTER_VALIDATE_EMAIL);
+        }
+
+        if ($usersAreEmails) {
+            foreach ($usersArray as $email) {
+                $email = trim((string)$email);
+                if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                    continue;
+                }
+                $ent_user[] = [
+                    'id' => 0,
+                    'email' => $email,
+                    'name' => '',
+                    'lname' => '',
+                ];
+            }
+        } else {
+            $ent_user = $this->SysUsers->find()->select(['SysUsers.id','SysUsers.email','SysUsers.name','SysUsers.lname'])
+                ->where(
+                    ['SysUsers.id in ' => $usersArray])
+                ->toArray();
+        }
         $constants = [
             'Injector'   => '*|FNAME|* *|LNAME|*',
         ];

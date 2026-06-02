@@ -32,6 +32,7 @@ use \Firebase\JWT\Key;
 use SpaLiveV1\Controller\SubscriptionController;
 use SpaLiveV1\Controller\SummaryController;
 use SpaLiveV1\Controller\Data\ServicesHelper;
+use SpaLiveV1\Controller\FillersController;
 use SpaLiveV1\Controller\MailChimpController;
 
 //require_once(ROOT . DS . 'vendor' . DS  . 'Mailchimp' . DS . 'autoload.php');
@@ -1613,6 +1614,8 @@ class MainController extends AppPluginController {
         $ent_user = array();
         $email_string = "";
         $email_array = array();
+        $pending_list_526_phones = array();
+        $peptide_distribution_phones = array();
         $field_valid = $is_email ? '(DNS.allow_email IS NULL OR DNS.allow_email = 1)' :
                        ($is_sms ? '(DNS.allow_sms IS NULL OR DNS.allow_sms = 1)' : '(DNS.allow_push IS NULL OR DNS.allow_push = 1)');
         $SU = array();
@@ -1683,6 +1686,82 @@ class MainController extends AppPluginController {
             ->where($notExistsCoursePaymentSql)
             ->group(['SysUsers.email'])
             ->toArray();
+        } else if ($type == 'PENDING LIST 5_26') {
+            // External list (filtered_list); no sys_users — email via Mailchimp, SMS via direct Twilio.
+            $rawRows = $this->SysUsers->getConnection()->execute(
+                "SELECT DISTINCT Email, Phone FROM filtered_list
+                WHERE (`Email` IS NOT NULL AND TRIM(Email) <> '' OR Phone IS NOT NULL AND TRIM(Phone) <> '')
+                AND `LEVEL 1` = 'NO'
+                AND `LEVEL 2` = 'NO'
+                AND `LEVEL 3` = 'NO'
+                AND `Subscribed Tox MD` = 'INACTIVE'"
+            )->fetchAll('assoc');
+            $phonesSeen = array();
+            foreach ($rawRows as $row) {
+                $email = isset($row['Email']) ? trim((string)$row['Email']) : '';
+                if ($email !== '' && filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                    $ent_user[] = [
+                        'id' => $email,
+                        'email' => $email,
+                        'name' => '',
+                        'lname' => '',
+                    ];
+                }
+                $phoneE164 = $this->normalizeBulkSmsPhoneNumber(isset($row['Phone']) ? $row['Phone'] : '');
+                if ($phoneE164 !== null && !isset($phonesSeen[$phoneE164])) {
+                    $phonesSeen[$phoneE164] = true;
+                    $pending_list_526_phones[] = $phoneE164;
+                }
+            }
+        } else if ($type == 'PEPTIDE DISTRIBUTION') {
+            // Full filtered_list; exclude rows that match peptide_distributors (email or phone).
+            $conn = $this->SysUsers->getConnection();
+            $distributorEmails = array();
+            $distributorPhones = array();
+            $distributorRows = $conn->execute(
+                'SELECT Email, Phone FROM peptide_distributors'
+            )->fetchAll('assoc');
+            foreach ($distributorRows as $pdRow) {
+                $pdEmail = isset($pdRow['Email']) ? strtolower(trim((string)$pdRow['Email'])) : '';
+                if ($pdEmail !== '') {
+                    $distributorEmails[$pdEmail] = true;
+                }
+                $pdPhone = $this->normalizeBulkSmsPhoneNumber(isset($pdRow['Phone']) ? $pdRow['Phone'] : '');
+                if ($pdPhone !== null) {
+                    $distributorPhones[$pdPhone] = true;
+                }
+            }
+
+            $rawRows = $conn->execute(
+                "SELECT DISTINCT Email, Phone FROM filtered_list
+                WHERE (`Email` IS NOT NULL AND TRIM(Email) <> '' OR Phone IS NOT NULL AND TRIM(Phone) <> '')"
+            )->fetchAll('assoc');
+
+            $phonesSeen = array();
+            foreach ($rawRows as $row) {
+                $email = isset($row['Email']) ? trim((string)$row['Email']) : '';
+                $emailKey = strtolower($email);
+                $phoneE164 = $this->normalizeBulkSmsPhoneNumber(isset($row['Phone']) ? $row['Phone'] : '');
+
+                $isDistributor = ($emailKey !== '' && isset($distributorEmails[$emailKey]))
+                    || ($phoneE164 !== null && isset($distributorPhones[$phoneE164]));
+                if ($isDistributor) {
+                    continue;
+                }
+
+                if ($email !== '' && filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                    $ent_user[] = [
+                        'id' => $email,
+                        'email' => $email,
+                        'name' => '',
+                        'lname' => '',
+                    ];
+                }
+                if ($phoneE164 !== null && !isset($phonesSeen[$phoneE164])) {
+                    $phonesSeen[$phoneE164] = true;
+                    $peptide_distribution_phones[] = $phoneE164;
+                }
+            }
         } else if($type == 'INJECTOR BOOKED BASIC TRAINING'){
             if(count($SU)>0){
                 $where = ['SysUsers.deleted' => 0,'SysUsers.type' => 'injector','SysUsers.active' => 1, 'CatTrainings.scheduled >=' => $now, 'CatTrainings.level' => 'LEVEL 1', $field_valid,$SU] ;
@@ -2043,7 +2122,49 @@ class MainController extends AppPluginController {
              
         // print_r($ent_user); exit;
         foreach ($ent_user as $row) {
-            $users_array[] = $row['id'];
+            if ($type == 'PENDING LIST 5_26') {
+                $users_array[] = $row['email'];
+            } else if ($type == 'PEPTIDE DISTRIBUTION') {
+                $users_array[] = $row['email'];
+            } else {
+                $users_array[] = $row['id'];
+            }
+        }
+
+        if ($type == 'PENDING LIST 5_26' && (int)$is_sms === 1 && (int)$is_email === 0) {
+            $this->sendBulkSmsToPhoneNumbers($body, $pending_list_526_phones);
+            $is_dev = env('IS_DEV', false);
+            if (!$is_dev) {
+                $this->send_email_after_register(
+                    'myspa@myspalive.com, cora@advantedigital.com',
+                    'bulk notification',
+                    $body . '</br></br> Number of SMS recipients: ' . count($pending_list_526_phones)
+                );
+            }
+            return;
+        }
+
+        if ($type == 'PENDING LIST 5_26' && (int)$is_sms === 0 && (int)$is_email === 0) {
+            $this->message('PENDING LIST 5_26 requires email or SMS.');
+            return;
+        }
+
+        if ($type == 'PEPTIDE DISTRIBUTION' && (int)$is_sms === 1 && (int)$is_email === 0) {
+            $this->sendBulkSmsToPhoneNumbers($body, $peptide_distribution_phones);
+            $is_dev = env('IS_DEV', false);
+            if (!$is_dev) {
+                $this->send_email_after_register(
+                    'myspa@myspalive.com, cora@advantedigital.com',
+                    'bulk notification',
+                    $body . '</br></br> Number of SMS recipients: ' . count($peptide_distribution_phones)
+                );
+            }
+            return;
+        }
+
+        if ($type == 'PEPTIDE DISTRIBUTION' && (int)$is_sms === 0 && (int)$is_email === 0) {
+            $this->message('PEPTIDE DISTRIBUTION requires email or SMS.');
+            return;
         }
 
         if ($is_email == 1) {
@@ -9860,8 +9981,10 @@ class MainController extends AppPluginController {
             return;
         }
 
+        $phones = $this->emergencyPhoneOverrideForInjectorMd176($user);
+        $this->emergencyPhone = $phones['emergencyPhone'];
         $this->set('emergencyPhone', $this->emergencyPhone);
-
+        $this->set('emergencyPhone2', $phones['emergencyPhone2']);
 
         $userType = $user['user_role'];
         $this->loadModel('SpaLiveV1.DataMessages');
@@ -15572,6 +15695,37 @@ class MainController extends AppPluginController {
 
     }
 
+    /**
+     * inventory_grid items must expose shop_button as JSON booleans (not 0/1).
+     */
+    private function normalizeInventoryShopItems(array $items): array
+    {
+        foreach ($items as &$item) {
+            if (!is_array($item) || !array_key_exists('shop_button', $item)) {
+                continue;
+            }
+            $shopButton = $item['shop_button'];
+            $item['shop_button'] = $shopButton === true
+                || $shopButton === 1
+                || $shopButton === '1';
+        }
+        unset($item);
+
+        return $items;
+    }
+
+    private function normalizeInventoryShopCategoryMap(array $categoryMap): array
+    {
+        foreach ($categoryMap as &$items) {
+            if (is_array($items)) {
+                $items = $this->normalizeInventoryShopItems($items);
+            }
+        }
+        unset($items);
+
+        return $categoryMap;
+    }
+
     public function inventory_grid() {
 
         $token = get('token',"");
@@ -15608,14 +15762,7 @@ class MainController extends AppPluginController {
 
         $shop_level_medical = empty($payment_advanced) ? false : true;
 
-        $shop_level_3 = false;
-
         $filler_check = $this->SysUsers->find()->select(['SysUsers.filler_check'])->where(['SysUsers.id' => USER_ID])->first();
-
-        if ($filler_check->filler_check == 1) {
-            $shop_level_3 = true;
-        }
-
 
         $reference = [
             // 'LASH_ENHACEMENT',
@@ -15675,6 +15822,47 @@ class MainController extends AppPluginController {
 
         $allow_skin_products = $e_user->skin_products == 1? true : false;
 
+        // Otras Escuelas (school_id 332): suscripción MICRONEEDLING no debe abrir catálogo skin/related
+        if ($allow_skin_products && USER_TYPE !== 'clinic') {
+            $this->loadModel('SpaLiveV1.DataCourses');
+            $other_school_microneedling_course = $this->DataCourses->find()
+                ->select(['DataCourses.id'])
+                ->join([
+                    'CatCourses' => [
+                        'table' => 'cat_courses',
+                        'type' => 'INNER',
+                        'conditions' => 'CatCourses.id = DataCourses.course_id',
+                    ],
+                ])
+                ->where([
+                    'DataCourses.user_id' => USER_ID,
+                    'DataCourses.deleted' => 0,
+                    'DataCourses.status' => 'DONE',
+                    'CatCourses.school_id' => 332,
+                    'CatCourses.deleted' => 0,
+                ])
+                ->first();
+
+            if (!empty($other_school_microneedling_course)) {
+                $this->loadModel('SpaLiveV1.DataSubscriptions');
+                $microneedling_subscription = $this->DataSubscriptions->find()
+                    ->where([
+                        'DataSubscriptions.user_id' => USER_ID,
+                        'DataSubscriptions.deleted' => 0,
+                        'DataSubscriptions.status' => 'ACTIVE',
+                        'OR' => [
+                            'DataSubscriptions.main_service LIKE' => '%MICRONEEDLING%',
+                            'DataSubscriptions.addons_services LIKE' => '%MICRONEEDLING%',
+                        ],
+                    ])
+                    ->first();
+
+                if (!empty($microneedling_subscription)) {
+                    $allow_skin_products = false;
+                }
+            }
+        }
+
         // Producto 394: requiere training LEVEL_TWO_DUAL_TOX_AND_DEMALL_FILLER + suscripción a FILLERS y NEUROTOXINS
         $allow_product_394 = ($e_user->level_two_dual == 1 && $e_user->fillers == 1 && $e_user->neurotoxins == 1);
 
@@ -15690,6 +15878,16 @@ class MainController extends AppPluginController {
             // $allow_lift = true;
             // $allow_flip = true;
         }
+
+        $FC = new FillersController();
+        // Suscripción MD+FILLERS define si puede ver la categoría (igual que antes). El certificado/training
+        // solo acota el listado cuando aplica FILLER_COURSE_LEVEL_1 sin L2/L3/escuela/OT dinámico.
+        $allow_fillers_shop = $allow_fillers;
+        $filler_shop_restricted_level1 = $allow_fillers_shop
+            && USER_TYPE !== 'clinic'
+            && $FC->fillersCiAccessIsRestricted(USER_ID);
+        $filler_shop_full_access = $allow_fillers_shop && !$filler_shop_restricted_level1;
+        $shop_level_3 = $filler_shop_full_access || ((int)$filler_check->filler_check === 1);
 
         // if($e_user->subscriptions < 2) {
         //     $allow_neurotoxins = false;
@@ -15748,7 +15946,10 @@ class MainController extends AppPluginController {
 
             if ($row['category'] == 'MATERIALS' && !$allow_materials) continue;
             if ( ($row['category'] == 'NEUROTOXINS' || $row['category'] == 'NEUROTOXIN PACKAGES') && !$allow_neurotoxins) continue;
-            if ( ($row['category'] == 'FILLERS' || $row['category'] == 'FILLER PACKAGES') && !$allow_fillers) continue;
+            if ( ($row['category'] == 'FILLERS' || $row['category'] == 'FILLER PACKAGES') && !$allow_fillers_shop) continue;
+            if (($row['category'] == 'FILLERS' || $row['category'] == 'FILLER PACKAGES') && $filler_shop_restricted_level1 && !$FC->shopFillerProductAllowedForLevel1Catalog((string)$row['name'])) {
+                continue;
+            }
             if ($row['category'] == 'MISCELLANEOUS' && !$allow_miscellaneous) continue;
             if ($row['category'] == 'IV VIALS' && !$allow_ivt) continue;
             if (in_array($row['category'], ['ACNE PRODUCTS', 'BRIGHTENING PRODUCTS', 'ANTI-AGING PRODUCTS', 'BACKBAR PRODUCTS','SKIN PRODUCTS','SKIN KITS']) && !$allow_skin_products ) continue; 
@@ -15894,10 +16095,13 @@ class MainController extends AppPluginController {
             
             if ($row['category'] == 'MATERIALS' && !$allow_materials) continue;
             if ( ($row['category'] == 'NEUROTOXINS' || $row['category'] == 'NEUROTOXIN PACKAGES') && !$allow_neurotoxins) continue;
-            if ( ($row['category'] == 'FILLERS' || $row['category'] == 'FILLER PACKAGES') && !$allow_fillers) continue;
+            if ( ($row['category'] == 'FILLERS' || $row['category'] == 'FILLER PACKAGES') && !$allow_fillers_shop) continue;
+            if (($row['category'] == 'FILLERS' || $row['category'] == 'FILLER PACKAGES') && $filler_shop_restricted_level1 && !$FC->shopFillerProductAllowedForLevel1Catalog((string)$row['name'])) {
+                continue;
+            }
             if ($row['category'] == 'MISCELLANEOUS' && !$allow_miscellaneous) continue;
             if ($row['category'] == 'IV VIALS' && !$allow_ivt) continue;
-            if (in_array($row['category'], ['ACNE PRODUCTS', 'BRIGHTENING PRODUCTS', 'ANTI-AGING PRODUCTS', 'BACKBAR PRODUCTS','SKIN PRODUCTS']) && !$allow_skin_products ) continue; 
+            if (in_array($row['category'], ['ACNE PRODUCTS', 'BRIGHTENING PRODUCTS', 'ANTI-AGING PRODUCTS', 'BACKBAR PRODUCTS','SKIN PRODUCTS','SKIN KITS']) && !$allow_skin_products ) continue; 
             // Producto 394: requiere training LEVEL_TWO_DUAL_TOX_AND_DEMALL_FILLER + suscripción a FILLERS y NEUROTOXINS
             if ($row['id'] == 394 && !$allow_product_394) continue;
             //if ($row['category'] == 'IV VIALS') continue;
@@ -16191,12 +16395,15 @@ class MainController extends AppPluginController {
                 );
         }
 
-
+        $other = $this->normalizeInventoryShopItems($other);
+        $arr_iv = $this->normalizeInventoryShopItems($arr_iv);
+        $arr_prod = $this->normalizeInventoryShopCategoryMap($arr_prod);
 
         $this->set('other', $other);
         sort($arr_iv);
         $this->set('arr_iv', $arr_iv);
-        $data_order = array_merge($arr_iv,$other);
+        $data_order = array_merge($arr_iv, $other);
+        $data_order = $this->normalizeInventoryShopItems($data_order);
         $this->set('data', $data_order);
         $this->set('data_order', array_reverse($arr_prod));
         $this->set('total_prod', sizeof($res_arr));
@@ -16257,7 +16464,7 @@ class MainController extends AppPluginController {
                         'delivery_company' => empty($row['delivery_company']) ? "" : $row['delivery_company'],
                         'tracking_two' => empty($row['tracking2']) ? "" : $row['tracking2'],
                         'delivery_company_two' => empty($row['delivery_company2']) ? "" : $row['delivery_company2'],
-                        'shipping_date' => empty($row['shipping_date']) ? "" : $row['shipping_date'],
+                        'shipping_date' => empty($row['shipping_date']) ? $row['created'] : $row['shipping_date'],
                         'created' => $row['created'],
                         'show_signature' => $row['status'] == 'READY FOR PICKUP' && $row['is_pickup'], 
                         'signature' => empty($row['signature']) ? 0 : $row['signature'],
@@ -16268,7 +16475,7 @@ class MainController extends AppPluginController {
                     );
 
                     $this->loadModel('SpaLiveV1.DataPurchasesDetail');
-                    $ent_purchases = $this->DataPurchasesDetail->find()->select(['DataPurchasesDetail.price', 'DataPurchasesDetail.qty','Product.name','Product.category', 'DataPurchasesDetail.product_id'])
+                    $purchase_details = $this->DataPurchasesDetail->find()->select(['DataPurchasesDetail.price', 'DataPurchasesDetail.qty','Product.name','Product.category', 'DataPurchasesDetail.product_id'])
                     ->join([
                         'Product' => ['table' => 'cat_products', 'type' => 'INNER', 'conditions' => 'Product.id = DataPurchasesDetail.product_id']
                     ])->where(['DataPurchasesDetail.purchase_id' => $row['id']])->limit(100)->order(['DataPurchasesDetail.id' => 'DESC'])->all();
@@ -16276,9 +16483,9 @@ class MainController extends AppPluginController {
                     $detail_array = array();
                     $grand_total = 0;
 
-                    if(!empty($ent_purchases)){
+                    if(!empty($purchase_details)){
                             
-                        foreach ($ent_purchases as $_row) {
+                        foreach ($purchase_details as $_row) {
                             if($_row['product_id'] == 44){
                                 $add_result['status'] = '';
                                 $add_result['tracking'] = '';
@@ -17206,6 +17413,33 @@ class MainController extends AppPluginController {
         //$this->set('q ', $data_questions);
     }
 
+    /**
+     * Qualiphy join URLs can expire before patients join. If true, start_consultation refreshes the invite in place.
+     * Set QUALIPHY_INVITE_MAX_AGE_DAYS=0 to disable (always reuse cached URL when not Zoom).
+     */
+    protected function qualiphyInviteIsStale($consultation): bool
+    {
+        $maxDays = (int) env('QUALIPHY_INVITE_MAX_AGE_DAYS', 7);
+        if ($maxDays <= 0) {
+            return false;
+        }
+        $at = $consultation->qualiphy_invite_at ?? null;
+        if ($at === null || $at === '') {
+            return true;
+        }
+        if ($at instanceof \DateTimeInterface) {
+            $threshold = (new \DateTimeImmutable('now'))->modify("-{$maxDays} days");
+
+            return $at < $threshold;
+        }
+        $ts = strtotime((string) $at);
+        if ($ts === false) {
+            return true;
+        }
+
+        return $ts < (time() - $maxDays * 86400);
+    }
+
     public function start_consultation(){
         $this->loadModel('SpaLiveV1.DataConsultation'); 
         $this->loadModel('SpaLiveV1.DataPayment'); 
@@ -17313,7 +17547,6 @@ class MainController extends AppPluginController {
 
         $consultation_uid = get('consultation_uid','');
         if (empty($consultation_uid)) {
-            $consultation_uid = Text::uuid();
 
             $schedule_by = 0;
             $schedule_date = get('schedule_date','');
@@ -17356,12 +17589,43 @@ class MainController extends AppPluginController {
                 $posicion = strpos($consultation->join_url, 'zoom.us');
 
                 if ($posicion === false){
-                    $this->set('meeting_url', $consultation->join_url);
-                    $this->set('uid', $consultation->uid);
-                    $this->success();
+                    if (!$this->qualiphyInviteIsStale($consultation)) {
+                        $this->set('meeting_url', $consultation->join_url);
+                        $this->set('uid', $consultation->uid);
+                        $this->success();
+                        return;
+                    }
+
+                    $qualiphyRefresh = new QualiphyController();
+                    $rRefresh = $qualiphyRefresh->generate_meeting(
+                        ['consultation_uid' => $consultation->uid, 'user_uid' => USER_UID, 'type' => $string_treatments],
+                        $string_treatments,
+                        $ot_exam_id
+                    );
+                    if (!is_array($rRefresh) || ($rRefresh['http_code'] ?? 0) != 200) {
+                        $this->message($rRefresh['http_code'] ?? 'Qualiphy refresh failed');
+                        if (!empty($rRefresh['error_message'])) {
+                            $this->message($rRefresh['error_message']);
+                        }
+                        return;
+                    }
+                    $inviteNow = date('Y-m-d H:i:s');
+                    $this->DataConsultation->patchEntity($consultation, [
+                        'meeting' => $rRefresh['patient_exams'][0]['patient_exam_id'],
+                        'meeting_pass' => $rRefresh['meeting_uuid'],
+                        'join_url' => $rRefresh['meeting_url'],
+                        'qualiphy_invite_at' => $inviteNow,
+                    ]);
+                    if ($this->DataConsultation->save($consultation)) {
+                        $this->set('meeting_url', $rRefresh['meeting_url']);
+                        $this->set('uid', $consultation->uid);
+                        $this->success();
+                    }
                     return;
                 }
             }
+
+            $consultation_uid = Text::uuid();
 
             $array_save = array(
                 'uid' => $consultation_uid,
@@ -17391,6 +17655,7 @@ class MainController extends AppPluginController {
                 $array_save['meeting'] = $r['patient_exams'][0]['patient_exam_id'];
                 $array_save['meeting_pass'] = $r['meeting_uuid'];
                 $array_save['join_url'] = $r['meeting_url'];
+                $array_save['qualiphy_invite_at'] = date('Y-m-d H:i:s');
 
             } else {
                 $this->message($r['http_code']);
@@ -19827,14 +20092,15 @@ class MainController extends AppPluginController {
         //     return;
         // }
 
-        $string_prices = get('services','');
-        
-        $arr_prices = explode('|', $string_prices);
-        if ($model == "injector" && empty($arr_prices)) {
+        $string_prices = get('services', '');
+
+        $arr_prices = array_values(array_filter(array_map('trim', explode('|', (string)$string_prices)), static function ($chunk) {
+            return $chunk !== '';
+        }));
+        if ($model === 'injector' && count($arr_prices) === 0) {
             $this->message('Invalid services string format.');
             return;
         }
-        
 
         $array_save = array(
                 'id' => USER_ID,
@@ -19915,6 +20181,23 @@ class MainController extends AppPluginController {
             $this->loadModel('SpaLiveV1.DataTreatmentsPrice');
             $servicesPriceEligibility = new ServicesHelper(USER_ID);
 
+            $saveable_price_rows = [];
+            foreach ($arr_prices as $row) {
+                $arr_inter = array_map('trim', explode(',', $row));
+                if (count($arr_inter) < 2 || $arr_inter[0] === '' || $arr_inter[1] === '') {
+                    continue;
+                }
+                if (!$servicesPriceEligibility->injector_may_set_price_for_ci_treatment((int)$arr_inter[0])) {
+                    continue;
+                }
+                $saveable_price_rows[] = ['inter' => $arr_inter];
+            }
+
+            if (count($arr_prices) > 0 && count($saveable_price_rows) === 0) {
+                $this->message('No service prices could be saved. Check id,price format, or complete the required subscription step for those treatments.');
+                return;
+            }
+
             if (count($arr_prices) > 0) {
                 $str_query_delete = "
                     UPDATE data_treatments_prices SET deleted = 1 WHERE user_id = " . USER_ID;
@@ -19923,18 +20206,15 @@ class MainController extends AppPluginController {
 
             $services_array = array();
 
-            foreach ($arr_prices as $row) {
-                // services: id,price|id,price
-                $arr_inter = explode(",",$row);
-
-                if (count($arr_inter) < 2) continue;
-
-                if (!$servicesPriceEligibility->injector_may_set_price_for_ci_treatment((int)$arr_inter[0])) {
-                    continue;
-                }
+            foreach ($saveable_price_rows as $saveable) {
+                $arr_inter = $saveable['inter'];
 
                 
-                $p_entity = $this->DataTreatmentsPrice->find()->where(['DataTreatmentsPrice.treatment_id' => $arr_inter[0],'DataTreatmentsPrice.user_id' => USER_ID])->first();
+                $p_entity = $this->DataTreatmentsPrice->find()->where([
+                    'DataTreatmentsPrice.treatment_id' => $arr_inter[0],
+                    'DataTreatmentsPrice.user_id' => USER_ID,
+                    'DataTreatmentsPrice.deleted' => 0,
+                ])->first();
 
                 if (!empty($p_entity)) 
                     $p_id = $p_entity->id;
@@ -19944,12 +20224,16 @@ class MainController extends AppPluginController {
                 $services_array[] = $arr_inter[0];
 
                 $arr_save_q = array(
-                    'id' => $p_id,
                     'user_id' => USER_ID,
                     'treatment_id' => $arr_inter[0],
                     'price' => $arr_inter[1],
+                    'alias' => '',
                     'deleted' => 0,
+                    'createdby' => USER_ID,
                 );
+                if (!empty($p_id)) {
+                    $arr_save_q['id'] = $p_id;
+                }
                 
 
                 $cq_entity = $this->DataTreatmentsPrice->newEntity($arr_save_q);
@@ -21507,6 +21791,83 @@ class MainController extends AppPluginController {
 
     //$Main->notify_devices('FIRST_CLAIM',array($ent_treatment->patient_id),true,true,true, array(), '',array(),true,false,$treatment_uid);
 
+    /**
+     * Strip (), -, spaces, etc. and return US E.164 (+1xxxxxxxxxx) or null.
+     */
+    private function normalizeBulkSmsPhoneNumber($phone)
+    {
+        $digits = preg_replace('/\D+/', '', (string)$phone);
+        if ($digits === '') {
+            return null;
+        }
+        if (strlen($digits) === 11 && $digits[0] === '1') {
+            $digits = substr($digits, 1);
+        }
+        if (strlen($digits) !== 10) {
+            return null;
+        }
+        return '+1' . $digits;
+    }
+
+    /**
+     * Bulk SMS to phone numbers outside sys_users (e.g. filtered_list).
+     */
+    private function sendBulkSmsToPhoneNumbers($body, array $phones)
+    {
+        $is_dev = env('IS_DEV', false);
+        if ($is_dev) {
+            $this->log(__METHOD__ . ' SMS skipped in dev; recipient_count=' . count($phones));
+            return;
+        }
+
+        $normalized = array();
+        foreach ($phones as $phone) {
+            $e164 = $this->normalizeBulkSmsPhoneNumber($phone);
+            if ($e164 !== null) {
+                $normalized[$e164] = true;
+            }
+        }
+        $phones = array_keys($normalized);
+        if (empty($phones)) {
+            $this->log(__METHOD__ . ' SMS skipped: no valid phone numbers.');
+            return;
+        }
+
+        set_time_limit(0);
+        ini_set('max_execution_time', '0');
+
+        $sid = env('TWILIO_ACCOUNT_SID');
+        $token = env('TWILIO_AUTH_TOKEN');
+        if (empty($sid) || empty($token)) {
+            $this->log(__METHOD__ . ' SMS skipped: Twilio credentials are not configured.');
+            return;
+        }
+
+        try {
+            $twilio = new Client($sid, $token);
+            $twilio_number = '+19516434078';
+            $smsCount = count($phones);
+            $smsIndex = 0;
+
+            foreach ($phones as $phone_number) {
+                try {
+                    $twilio->messages->create($phone_number, [
+                        'body' => $body,
+                        'from' => $twilio_number,
+                    ]);
+                } catch (TwilioException $e) {
+                    $this->log(__LINE__ . ' TwilioException bulk filtered_list ' . $phone_number . ' ' . json_encode($e->getCode()));
+                }
+                $smsIndex++;
+                if ($smsIndex < $smsCount) {
+                    sleep(1);
+                }
+            }
+        } catch (TwilioException $e) {
+            $this->log(__METHOD__ . ' Twilio client error: ' . $e->getMessage());
+        }
+    }
+
     public function notify_devices($message, $arr_users, $notify_push = false, $notify_email = false, $shouldSave = true, $data = array(),$body_extra = '', $constants = array(), $notify_sms = false, $force_hour = false, $treatment_uid='', $bulk = false) {
 
         $is_dev = env('IS_DEV', false);
@@ -22890,8 +23251,13 @@ class MainController extends AppPluginController {
 
         $tr_result = array();
 
-        // Same levels as CourseController::validateBasicTraining — hybrid counts as prerequisite for Level 2 / Advanced.
+        // Same levels as CourseController::validateBasicTraining / SummaryController course keys.
         $hybrid_basic_equivalent_levels = ['MYSPALIVES_HYBRID_TOX_FILLER_COURSE', 'MYSPALIVE_S_HYBRID_TOX_FILLER_COURSE'];
+        $basic_course_payment_types = array_merge(['BASIC COURSE'], $hybrid_basic_equivalent_levels);
+        $advanced_equivalent_levels = ['LEVEL 2', 'LEVEL_TWO_DUAL_TOX_AND_DEMALL_FILLER'];
+        $advanced_course_payment_types = ['ADVANCED COURSE', 'LEVEL_TWO_DUAL_TOX_AND_DEMALL_FILLER'];
+        $filler_equivalent_levels = ['LEVEL 3 FILLERS', 'FILLER_COURSE_LEVEL_1', 'MYSPALIVES_HYBRID_TOX_FILLER_COURSE', 'MYSPALIVE_S_HYBRID_TOX_FILLER_COURSE', 'LEVEL_TWO_DUAL_TOX_AND_DEMALL_FILLER'];
+        $filler_course_payment_types = array_merge(['FILLERS COURSE', 'LEVEL_TWO_DUAL_TOX_AND_DEMALL_FILLER', 'FILLER_COURSE_LEVEL_1'], $hybrid_basic_equivalent_levels);
 
         $_fields = ['CatTrainigs.id', 'CatTrainigs.title', 'CatTrainigs.scheduled', 'CatTrainigs.neurotoxins', 'CatTrainigs.fillers', 'CatTrainigs.materials', 'CatTrainigs.available_seats', 'CatTrainigs.level','State.name','State.abv','CatTrainigs.address','CatTrainigs.zip','CatTrainigs.city', 'data_training_id' => 'DataTrainigs.id', 'attended' => 'DataTrainigs.attended'];
         $_fields['assistants'] = "(SELECT COUNT(id) from data_trainings DT WHERE DT.training_id = CatTrainigs.id AND DT.deleted = 0)";
@@ -22918,13 +23284,17 @@ class MainController extends AppPluginController {
 
         $c_date = new \DateTime('2023-02-27 00:00:00');
         //$this->set('c_date', $c_date);
-        foreach ($done_trainings as $row) {
+        foreach (array_merge($done_trainings, $done_hybrid_basic_equivalent) as $row) {
             $seats = $row['available_seats'] - $row['assistants'];
 
             $address = $row->address.', '.$row->city.', '.$row->State['abv'].' '.$row->zip;
             $c_date = new \DateTime('2023-02-27 00:00:00');
             $status = 'DONE';
-            if($row['scheduled'] > $c_date){
+            if (in_array($row['level'], $hybrid_basic_equivalent_levels, true)) {
+                if ($row['scheduled'] > $c_date) {
+                    $status = $row['attended'] == 1 ? 'DONE' : 'VERIFY_ASSISTANCE';
+                }
+            } elseif ($row['scheduled'] > $c_date) {
 
                 $Course = new CourseController();
                 $basic_training_status = $Course->consult_neurotoxin_application($row,$user["user_id"]);
@@ -22961,7 +23331,7 @@ class MainController extends AppPluginController {
 
             $this->loadModel('SpaLiveV1.DataPayment');
             $payment = $this->DataPayment->find()
-                ->where(['DataPayment.id_from' => $user["user_id"], 'DataPayment.id_to' => 0,'DataPayment.type' => "BASIC COURSE", 
+                ->where(['DataPayment.id_from' => $user["user_id"], 'DataPayment.id_to' => 0,'DataPayment.type IN' => $basic_course_payment_types,
                     'DataPayment.service_uid' => '','DataPayment.payment <>' => '', 'DataPayment.is_visible' => 1])->first();
             
             if(!empty($payment)){
@@ -22978,7 +23348,8 @@ class MainController extends AppPluginController {
                 'DataTrainigs' => ['table' => 'data_trainings', 'type' => 'INNER', 'conditions' => 'CatTrainigs.id = DataTrainigs.training_id'],
                 'State' => ['table' => 'cat_states', 'type' => 'INNER', 'conditions' => 'State.id = CatTrainigs.state_id']
             ];
-            $_where = ['DataTrainigs.user_id' => USER_ID, 'DataTrainigs.deleted' => 0, 'CatTrainigs.deleted' => 0,'(DATE_FORMAT(CatTrainigs.scheduled, "%Y-%m-%d 09:00:00") > "' . $now . '")', 'CatTrainigs.level' => 'LEVEL 1'];
+            $basic_enrolled_levels = array_merge(['LEVEL 1'], $hybrid_basic_equivalent_levels);
+            $_where = ['DataTrainigs.user_id' => USER_ID, 'DataTrainigs.deleted' => 0, 'CatTrainigs.deleted' => 0,'(DATE_FORMAT(CatTrainigs.scheduled, "%Y-%m-%d 09:00:00") > "' . $now . '")', 'CatTrainigs.level IN' => $basic_enrolled_levels];
 
             $enrolled_trainings  = $this->CatTrainigs->find()->select($_fields)
             ->join($_join)
@@ -23159,7 +23530,7 @@ class MainController extends AppPluginController {
                 'State' => ['table' => 'cat_states', 'type' => 'INNER', 'conditions' => 'State.id = CatTrainigs.state_id']
             ];
         
-        $_where = ['DataTrainigs.user_id' => USER_ID, 'DataTrainigs.deleted' => 0, 'CatTrainigs.deleted' => 0,'(DATE_FORMAT(CatTrainigs.scheduled, "%Y-%m-%d 09:00:00") < "' . $now . '")', 'CatTrainigs.level' => 'LEVEL 2'];
+        $_where = ['DataTrainigs.user_id' => USER_ID, 'DataTrainigs.deleted' => 0, 'CatTrainigs.deleted' => 0,'(DATE_FORMAT(CatTrainigs.scheduled, "%Y-%m-%d 09:00:00") < "' . $now . '")', 'CatTrainigs.level IN' => $advanced_equivalent_levels];
 
         $done_trainings = $this->CatTrainigs->find()->select($_fields)
         ->join($_join)
@@ -23195,7 +23566,7 @@ class MainController extends AppPluginController {
 
             $this->loadModel('SpaLiveV1.DataPayment');
             $payment = $this->DataPayment->find()
-                ->where(['DataPayment.id_from' => $user["user_id"], 'DataPayment.id_to' => 0,'DataPayment.type' => "ADVANCED COURSE", 
+                ->where(['DataPayment.id_from' => $user["user_id"], 'DataPayment.id_to' => 0,'DataPayment.type IN' => $advanced_course_payment_types,
                     'DataPayment.service_uid' => '','DataPayment.payment <>' => '', 'DataPayment.is_visible' => 1,'DataPayment.refund_id' => 0])->first();
             
             if(!empty($payment)){
@@ -23210,7 +23581,7 @@ class MainController extends AppPluginController {
                 'DataTrainigs' => ['table' => 'data_trainings', 'type' => 'INNER', 'conditions' => 'CatTrainigs.id = DataTrainigs.training_id'],
                 'State' => ['table' => 'cat_states', 'type' => 'INNER', 'conditions' => 'State.id = CatTrainigs.state_id']
             ];
-            $_where = ['DataTrainigs.user_id' => USER_ID, 'DataTrainigs.deleted' => 0, 'CatTrainigs.deleted' => 0,'(DATE_FORMAT(CatTrainigs.scheduled, "%Y-%m-%d 09:00:00") > "' . $now . '")', 'CatTrainigs.level' => 'LEVEL 2'];
+            $_where = ['DataTrainigs.user_id' => USER_ID, 'DataTrainigs.deleted' => 0, 'CatTrainigs.deleted' => 0,'(DATE_FORMAT(CatTrainigs.scheduled, "%Y-%m-%d 09:00:00") > "' . $now . '")', 'CatTrainigs.level IN' => $advanced_equivalent_levels];
 
             
             $enrolled_trainings  = $this->CatTrainigs->find()->select($_fields)
@@ -23242,7 +23613,7 @@ class MainController extends AppPluginController {
                     $_join = [
                         'State' => ['table' => 'cat_states', 'type' => 'INNER', 'conditions' => 'State.id = CatTrainigs.state_id']
                     ];
-                    $_where = ['CatTrainigs.deleted' => 0, 'CatTrainigs.deleted' => 0, 'CatTrainigs.level' => 'LEVEL 2'];
+                    $_where = ['CatTrainigs.deleted' => 0, 'CatTrainigs.deleted' => 0, 'CatTrainigs.level IN' => $advanced_equivalent_levels];
 
                     if(!empty($training_level_one)){
                         $_where['CatTrainigs.scheduled >'] = $training_level_one['CatTrainigs']['scheduled'];
@@ -23305,125 +23676,123 @@ class MainController extends AppPluginController {
         
         $check_filler = $this->SysUsers->find()->select(['filler_check'])->where(['id' => USER_ID])->first();
 
-        if($check_filler->filler_check == 1){
+        $_fields_filler = ['CatTrainigs.id', 'CatTrainigs.title', 'CatTrainigs.scheduled', 'CatTrainigs.neurotoxins', 'CatTrainigs.fillers', 'CatTrainigs.materials', 'CatTrainigs.available_seats', 'CatTrainigs.level','State.name','State.abv','CatTrainigs.address','CatTrainigs.zip','CatTrainigs.city','data_training_id' => 'DataTrainigs.id', 'attended' => 'DataTrainigs.attended'];
+        $_fields_filler['assistants'] = "(SELECT COUNT(DT.id) from data_trainings DT JOIN sys_users U ON U.id = DT.user_id WHERE DT.training_id = CatTrainigs.id AND DT.deleted = 0 AND U.deleted = 0)";
+        $_fields_filler['enrolled'] = "(SELECT COUNT(id) from data_trainings DT WHERE DT.training_id = CatTrainigs.id AND DT.deleted = 0 AND DT.user_id = " . USER_ID . " )";
+        $_join_filler = [
+            'DataTrainigs' => ['table' => 'data_trainings', 'type' => 'INNER', 'conditions' => 'CatTrainigs.id = DataTrainigs.training_id'],
+            'State' => ['table' => 'cat_states', 'type' => 'INNER', 'conditions' => 'State.id = CatTrainigs.state_id']
+        ];
+        $_where_filler_done = ['DataTrainigs.user_id' => USER_ID, 'DataTrainigs.deleted' => 0, 'CatTrainigs.deleted' => 0,'(DATE_FORMAT(CatTrainigs.scheduled, "%Y-%m-%d 09:00:00") < "' . $now . '")', 'CatTrainigs.level IN' => $filler_equivalent_levels];
+
+        $filler_done_trainings = $this->CatTrainigs->find()->select($_fields_filler)
+            ->join($_join_filler)
+            ->where($_where_filler_done)->order(['CatTrainigs.scheduled' => 'ASC'])->toArray();
+
+        if (!empty($filler_done_trainings)) {
+            $show_buy_button_level_3_fillers = false;
+
+            foreach ($filler_done_trainings as $row) {
+                $seats = $row['available_seats'] - $row['assistants'];
+
+                $address = $row->address.', '.$row->city.', '.$row->State['abv'].' '.$row->zip;
+                $status = 'DONE';
+                if (in_array($row['level'], $hybrid_basic_equivalent_levels, true)) {
+                    if ($row['scheduled'] > $c_date) {
+                        $status = $row['attended'] == 1 ? 'DONE' : 'VERIFY_ASSISTANCE';
+                    }
+                } elseif ($row['scheduled'] > $c_date) {
+                    $status = $row['attended'] == 1 ? 'DONE' : 'VERIFY_ASSISTANCE';
+                }
+                $tr_result[] = array(
+                    'id'            => $row['id'],
+                    'title'         => $row['title'],
+                    'scheduled'   => $row['scheduled']->i18nFormat('MM-dd-Y hh:mm a'),
+                    'available_seats' => $seats,
+                    'status' => $status,
+                    'address' => $address,
+                    'level' => $row['level'],
+                    'data_training_id' => $row['data_training_id'],
+                );
+            }
+        } elseif ($check_filler->filler_check == 1) {
 
             $purchased = false;
 
             $this->loadModel('SpaLiveV1.DataPayment');
             $payment = $this->DataPayment->find()
-                ->where(['DataPayment.id_from' => $user["user_id"], 'DataPayment.id_to' => 0,'DataPayment.type' => "FILLERS COURSE", 
+                ->where(['DataPayment.id_from' => $user["user_id"], 'DataPayment.id_to' => 0,'DataPayment.type IN' => $filler_course_payment_types,
                     'DataPayment.service_uid' => '','DataPayment.payment <>' => '', 'DataPayment.is_visible' => 1])->first();
-            
+
             if(!empty($payment)){
                 $purchased =  true;
                 $show_buy_button_level_3_fillers = false;
 
                 $tr_result = array();
 
-                $_fields = ['CatTrainigs.id', 'CatTrainigs.title', 'CatTrainigs.scheduled', 'CatTrainigs.neurotoxins', 'CatTrainigs.fillers', 'CatTrainigs.materials', 'CatTrainigs.available_seats', 'CatTrainigs.level','State.name','State.abv','CatTrainigs.address','CatTrainigs.zip','CatTrainigs.city','data_training_id' => 'DataTrainigs.id', 'attended' => 'DataTrainigs.attended'];
-                $fields['assistants'] = "(SELECT COUNT(DT.id) from data_trainings DT JOIN sys_users U ON U.id = DT.user_id WHERE DT.training_id = CatTrainigs.id AND DT.deleted = 0 AND U.deleted = 0)";
+                // FIND ENROLLED TRAINING
+
+                $_fields = ['CatTrainigs.id', 'CatTrainigs.title', 'CatTrainigs.scheduled', 'CatTrainigs.neurotoxins', 'CatTrainigs.fillers', 'CatTrainigs.materials', 'CatTrainigs.available_seats', 'CatTrainigs.level','State.name','State.abv','CatTrainigs.address','CatTrainigs.zip','CatTrainigs.city','data_training_id' => 'DataTrainigs.id'];
+                $_fields['assistants'] = "(SELECT COUNT(id) from data_trainings DT WHERE DT.training_id = CatTrainigs.id AND DT.deleted = 0)";
                 $_fields['enrolled'] = "(SELECT COUNT(id) from data_trainings DT WHERE DT.training_id = CatTrainigs.id AND DT.deleted = 0 AND DT.user_id = " . USER_ID . " )";
                 $_join = [
-                        'DataTrainigs' => ['table' => 'data_trainings', 'type' => 'INNER', 'conditions' => 'CatTrainigs.id = DataTrainigs.training_id'],
-                        'State' => ['table' => 'cat_states', 'type' => 'INNER', 'conditions' => 'State.id = CatTrainigs.state_id']
-                    ];
-                
-                $_where = ['DataTrainigs.user_id' => USER_ID, 'DataTrainigs.deleted' => 0, 'CatTrainigs.deleted' => 0,'(DATE_FORMAT(CatTrainigs.scheduled, "%Y-%m-%d 09:00:00") < "' . $now . '")', 'CatTrainigs.level' => 'LEVEL 3 FILLERS'];
+                    'DataTrainigs' => ['table' => 'data_trainings', 'type' => 'INNER', 'conditions' => 'CatTrainigs.id = DataTrainigs.training_id'],
+                    'State' => ['table' => 'cat_states', 'type' => 'INNER', 'conditions' => 'State.id = CatTrainigs.state_id']
+                ];
+                $_where = ['DataTrainigs.user_id' => USER_ID, 'DataTrainigs.deleted' => 0, 'CatTrainigs.deleted' => 0,'(DATE_FORMAT(CatTrainigs.scheduled, "%Y-%m-%d 09:00:00") > "' . $now . '")', 'CatTrainigs.level IN' => $filler_equivalent_levels];
 
-                $done_trainings = $this->CatTrainigs->find()->select($_fields)
+                $enrolled_trainings  = $this->CatTrainigs->find()->select($_fields)
                 ->join($_join)
-                ->where($_where)->order(['CatTrainigs.scheduled' => 'ASC'])->toArray();
+                ->where($_where)->first();
 
-                foreach ($done_trainings as $row) {
-                    $seats = $row['available_seats'] - $row['assistants'];
+                if (!empty($enrolled_trainings)) {
 
-                    $address = $row->address.', '.$row->city.', '.$row->State['abv'].' '.$row->zip;
-                    $status = 'DONE';
-                    if($row['scheduled'] > $c_date){
-                        $status = $row['attended'] == 1
-                            ? 'DONE'
-                            : 'VERIFY_ASSISTANCE';
-                    }
+                    $seats = $enrolled_trainings['available_seats'] - $enrolled_trainings['assistants'];
+                    if($seats <= 0) $seats = 0;
+
+                    $address = $enrolled_trainings->address.', '.$enrolled_trainings->city.', '.$enrolled_trainings->State['abv'].' '.$enrolled_trainings->zip;
                     $tr_result[] = array(
-                        'id'            => $row['id'],
-                        'title'         => $row['title'],
-                        'scheduled'   => $row['scheduled']->i18nFormat('MM-dd-Y hh:mm a'),
+                        'id'            => $enrolled_trainings['id'],
+                        'title'         => $enrolled_trainings['title'],
+                        'scheduled'   => $enrolled_trainings['scheduled']->i18nFormat('MM-dd-Y hh:mm a'),
                         'available_seats' => $seats,
-                        'status' => $status,
+                        'status' => 'ENROLLED',
                         'address' => $address,
-                        'level' => $row['level'],
-                        'data_training_id' => $row['data_training_id'],
+                        'level' => 'Fillers Course Level 1',
                     );
-                }
 
-                if (empty($done_trainings)) {
+                } else {
 
-                    // FIND ENROLLED TRAINING
+                    // CHECK IF HAVE TRAINING PURCHASE
 
-                    $_fields = ['CatTrainigs.id', 'CatTrainigs.title', 'CatTrainigs.scheduled', 'CatTrainigs.neurotoxins', 'CatTrainigs.fillers', 'CatTrainigs.materials', 'CatTrainigs.available_seats', 'CatTrainigs.level','State.name','State.abv','CatTrainigs.address','CatTrainigs.zip','CatTrainigs.city','data_training_id' => 'DataTrainigs.id'];
-                    $_fields['assistants'] = "(SELECT COUNT(id) from data_trainings DT WHERE DT.training_id = CatTrainigs.id AND DT.deleted = 0)";
-                    $_fields['enrolled'] = "(SELECT COUNT(id) from data_trainings DT WHERE DT.training_id = CatTrainigs.id AND DT.deleted = 0 AND DT.user_id = " . USER_ID . " )";
+                    if ($purchased) {
+                    $fields = ['CatTrainigs.id', 'CatTrainigs.title', 'CatTrainigs.scheduled', 'CatTrainigs.neurotoxins', 'CatTrainigs.fillers', 'CatTrainigs.materials', 'CatTrainigs.available_seats', 'CatTrainigs.level','State.name','State.abv','CatTrainigs.address','CatTrainigs.zip','CatTrainigs.city'];
+                    $fields['assistants'] = "(SELECT COUNT(id) from data_trainings DT WHERE DT.training_id = CatTrainigs.id AND DT.deleted = 0)";
+                    $fields['enrolled'] = "(SELECT COUNT(id) from data_trainings DT WHERE DT.training_id = CatTrainigs.id AND DT.deleted = 0 AND DT.user_id = " . USER_ID . " )";
                     $_join = [
-                        'DataTrainigs' => ['table' => 'data_trainings', 'type' => 'INNER', 'conditions' => 'CatTrainigs.id = DataTrainigs.training_id'],
                         'State' => ['table' => 'cat_states', 'type' => 'INNER', 'conditions' => 'State.id = CatTrainigs.state_id']
                     ];
-                    $_where = ['DataTrainigs.user_id' => USER_ID, 'DataTrainigs.deleted' => 0, 'CatTrainigs.deleted' => 0,'(DATE_FORMAT(CatTrainigs.scheduled, "%Y-%m-%d 09:00:00") > "' . $now . '")', 'CatTrainigs.level' => 'LEVEL 3 FILLERS'];
+                    $_where = ['CatTrainigs.scheduled >' => $now, 'CatTrainigs.deleted' => 0, 'CatTrainigs.deleted' => 0, 'CatTrainigs.level IN' => $filler_equivalent_levels];
 
-                    
-                    $enrolled_trainings  = $this->CatTrainigs->find()->select($_fields)
+                    $trainingsavailable  = $this->CatTrainigs->find()->select($fields)
                     ->join($_join)
-                    ->where($_where)->first();
+                    ->where($_where)->toArray();
 
-                    if (!empty($enrolled_trainings)) {
+                    foreach ($trainingsavailable as $row) {
+                        $seats = $row['available_seats'] - $row['assistants'];
+                        if($seats <= 0) continue;
 
-                        $seats = $enrolled_trainings['available_seats'] - $enrolled_trainings['assistants'];
-                        if($seats <= 0) $seats = 0;
-
-                        $address = $enrolled_trainings->address.', '.$enrolled_trainings->city.', '.$enrolled_trainings->State['abv'].' '.$enrolled_trainings->zip;
+                        $address = $row->address.', '.$row->city.', '.$row->State['abv'].' '.$row->zip;
                         $tr_result[] = array(
-                            'id'            => $enrolled_trainings['id'],
-                            'title'         => $enrolled_trainings['title'],
-                            'scheduled'   => $enrolled_trainings['scheduled']->i18nFormat('MM-dd-Y hh:mm a'),
+                            'id'            => $row['id'],
+                            'title'         => $row['title'],
+                            'scheduled'   => $row['scheduled']->i18nFormat('MM-dd-Y hh:mm a'),
                             'available_seats' => $seats,
-                            'status' => 'ENROLLED',
+                            'status' => 'JOIN',
                             'address' => $address,
-                            'level' => 'Filler Foundations',
+                            'level' => 'Fillers Course Level 1',
                         );
-
-                    } else {
-
-                        // CHECK IF HAVE TRAINING PURCHASE
-
-                        if ($purchased) {
-                            $fields = ['CatTrainigs.id', 'CatTrainigs.title', 'CatTrainigs.scheduled', 'CatTrainigs.neurotoxins', 'CatTrainigs.fillers', 'CatTrainigs.materials', 'CatTrainigs.available_seats', 'CatTrainigs.level','State.name','State.abv','CatTrainigs.address','CatTrainigs.zip','CatTrainigs.city'];
-                            $fields['assistants'] = "(SELECT COUNT(id) from data_trainings DT WHERE DT.training_id = CatTrainigs.id AND DT.deleted = 0)";
-                            $fields['enrolled'] = "(SELECT COUNT(id) from data_trainings DT WHERE DT.training_id = CatTrainigs.id AND DT.deleted = 0 AND DT.user_id = " . USER_ID . " )";
-                            $_join = [
-                                'State' => ['table' => 'cat_states', 'type' => 'INNER', 'conditions' => 'State.id = CatTrainigs.state_id']
-                            ];
-                            $_where = ['CatTrainigs.scheduled >' => $now, 'CatTrainigs.deleted' => 0, 'CatTrainigs.deleted' => 0, 'CatTrainigs.level' => 'LEVEL 3 FILLERS'];
-
-                            $trainingsavailable  = $this->CatTrainigs->find()->select($fields)
-                            ->join($_join)
-                            ->where($_where)->toArray();
-
-                            foreach ($trainingsavailable as $row) {
-                                $seats = $row['available_seats'] - $row['assistants'];
-                                if($seats <= 0) continue;
-
-                                $address = $row->address.', '.$row->city.', '.$row->State['abv'].' '.$row->zip;
-                                $tr_result[] = array(
-                                    'id'            => $row['id'],
-                                    'title'         => $row['title'],
-                                    'scheduled'   => $row['scheduled']->i18nFormat('MM-dd-Y hh:mm a'),
-                                    'available_seats' => $seats,
-                                    'status' => 'JOIN',
-                                    'address' => $address,
-                                    'level' => 'Filler Foundations',
-                                );
-                            }
-
-                        }
+                    }
                     }
                 }
             } else{
@@ -23438,7 +23807,7 @@ class MainController extends AppPluginController {
                         'available_seats' => 0,
                         'status' => 'Waiting for payment',
                         'address' => '',
-                        'level' => 'Filler Foundations',
+                        'level' => 'Fillers Course Level 1',
                     );
                 }else{
                     $show_buy_button_level_3_fillers = true;
@@ -23449,12 +23818,12 @@ class MainController extends AppPluginController {
                         'available_seats' => 0,
                         'status' => '',
                         'address' => '',
-                        'level' => 'Filler Foundations',
+                        'level' => 'Fillers Course Level 1',
                     );
                 }
             }
         
-        } else{
+        } else {
             $show_buy_button_level_3_fillers = true;
             $tr_result[] = array(
                 'id'            => 0,
@@ -23463,7 +23832,7 @@ class MainController extends AppPluginController {
                 'available_seats' => 0,
                 'status' => '',
                 'address' => '',
-                'level' => 'Filler Foundations',
+                'level' => 'Fillers Course Level 1',
                 'data_training_id' => 0,
                 'checked' => false
             );
@@ -23478,7 +23847,7 @@ class MainController extends AppPluginController {
 
         $this->loadModel('SpaLiveV1.DataPayment');
         $payment_medical = $this->DataPayment->find()
-            ->where(['DataPayment.id_from' => USER_ID, 'DataPayment.id_to' => 0,'DataPayment.type' => "ADVANCED COURSE", 
+            ->where(['DataPayment.id_from' => USER_ID, 'DataPayment.id_to' => 0,'DataPayment.type IN' => $advanced_course_payment_types,
                 'DataPayment.payment <>' => '', 'DataPayment.is_visible' => 1,'DataPayment.refund_id' => 0])->first();
 
         $payment = $this->DataPayment->find()
@@ -24045,16 +24414,30 @@ class MainController extends AppPluginController {
         }
 
 
-        // valida si hay stock de fillers y si hay stock lo agrega a la lista
+        // Stock + prerequisites: basic neurotoxin + (advanced online or LEVEL 2 in-person); see CourseController::validateBasicAndAdvancedTraining
         $fillers = $this->CatProducts->find()->where(['CatProducts.id' => 178, 'CatProducts.deleted' => 0, 'CatProducts.stock' => 1])->first();
-        $this->set("show_buy_button_level_3_fillers", empty($fillers) ? false : $show_buy_button_level_3_fillers);
+        $level3_medical_product = $this->CatProducts->find()->where(['CatProducts.id' => 184, 'CatProducts.deleted' => 0, 'CatProducts.stock' => 1])->first();
+        $hasBasicAndAdvancedCourse = CourseController::validateBasicAndAdvancedTraining($this);
+        $hasFillerEquivalentTraining = CourseController::userHasFillerEquivalentTraining($this, (int)USER_ID);
+        if ($hasFillerEquivalentTraining) {
+            $show_buy_button_level_3_fillers = false;
+        }
+        $canShowBuyButtonLevel3Fillers = !empty($fillers) && $hasBasicAndAdvancedCourse && $show_buy_button_level_3_fillers;
+        $canShowBuyButtonLevel3Medical = !empty($level3_medical_product) && $show_buy_button_level_3_medical;
 
+        $message_level_3_fillers_prerequisite = '';
+        if (!empty($fillers) && $show_buy_button_level_3_fillers && !$hasBasicAndAdvancedCourse && !$hasFillerEquivalentTraining) {
+            $message_level_3_fillers_prerequisite = 'To purchase Filler Level 1 you must complete Basic Neurotoxin training and Advanced Neurotoxin or Level 2 (in-person) training.';
+        }
+
+        $this->set('show_buy_button_level_3_fillers', $canShowBuyButtonLevel3Fillers);
+        $this->set('message_level_3_fillers_prerequisite', $message_level_3_fillers_prerequisite);
 
         $this->set("show_buy_button_basic", $show_buy_button_basic);
         $this->set("show_buy_button_advanced", $show_buy_button_advanced);
         // $this->set("show_buy_button_level_3_fillers", $show_buy_button_level_3_fillers);
         //$this->set("show_buy_button_level_3_fillers", false);
-        $this->set("show_buy_button_level_3_medical", $show_buy_button_level_3_medical);
+        $this->set("show_buy_button_level_3_medical", $canShowBuyButtonLevel3Medical);
         //$this->set("show_buy_button_level_1_to_1", $show_buy_button_level_1_to_1);
         $this->set("show_buy_button_level_1_to_1", false);
         $this->set('data_trainings', $trainings_data);
@@ -24975,6 +25358,11 @@ class MainController extends AppPluginController {
         $ot_key_name = get('name_key', false);
         
         $this->loadModel('SpaLiveV1.DataPayment');
+
+        $ent_payment = $this->DataPayment->find()
+                ->where(['DataPayment.id_from' => USER_ID, 'DataPayment.id_to' => 0,'DataPayment.type' => 'GFE', 'DataPayment.service_uid' => '','DataPayment.payment <>' => '','DataPayment.prepaid' => 1, 'DataPayment.comission_payed' => 1])->first();
+
+
         // Verificacion para nuevo registro de paciente
         if(USER_TYPE == 'patient') {
             $this->set('crossed_price', '$79');
@@ -25002,8 +25390,7 @@ class MainController extends AppPluginController {
                 $ondemando_flow = true;
             }
 
-            $ent_payment = $this->DataPayment->find()
-                ->where(['DataPayment.id_from' => USER_ID, 'DataPayment.id_to' => 0,'DataPayment.type' => 'GFE', 'DataPayment.service_uid' => '','DataPayment.payment <>' => '','DataPayment.prepaid' => 1, 'DataPayment.comission_payed' => 1])->first();
+
 
             $fields = ['DataTreatment.id', 'DataTreatment.uid', 'DataTreatment.status', 'DataTreatment.treatments'];
             $fields['treatments_string'] = "(SELECT GROUP_CONCAT(CONCAT(CTC.name,' (',CT.name, ')') SEPARATOR ', ') 
@@ -25012,6 +25399,8 @@ class MainController extends AppPluginController {
                                         WHERE FIND_IN_SET(CT.id,DataTreatment.treatments) LIMIT 1)";
             $_where = ['DataTreatment.patient_id' => USER_ID, 'DataTreatment.deleted' => 0];
             $_having = [];
+
+
 
             $ttype = get('type','');
             if (!empty($ttype)) {
@@ -25056,11 +25445,7 @@ class MainController extends AppPluginController {
                     }
                 }
 
-                if($require_gfe){
-                    $request_payment = empty($ent_payment) ? true : false;
-                }else{
-                    $request_payment = false;
-                }
+                $request_payment = empty($ent_payment) ? true : false;
 
                 $av_result = $this->gfeAvailability();
 
@@ -25078,11 +25463,7 @@ class MainController extends AppPluginController {
             }
 
             $require_gfe = true;
-            if($require_gfe){
-                $request_payment = empty($ent_payment) ? true : false;
-            }else{
-                $request_payment = false;
-            }
+            $request_payment = empty($ent_payment) ? true : false;
 
             $av_result = $this->gfeAvailability();
 
@@ -25125,11 +25506,7 @@ class MainController extends AppPluginController {
 
         $request_payment = true;
 
-        if($require_gfe){
-            $request_payment = empty($ent_payment) ? true : false;
-        }else{
-            $request_payment = false;
-        }
+        $request_payment = empty($ent_payment) ? true : false;
 
         $this->set('require_gfe', $require_gfe);
         $this->set('request_payment', $request_payment);
@@ -36589,7 +36966,7 @@ class MainController extends AppPluginController {
                     break;
                 case 'COURSE_FILLERS_LEVEL_1':
                 case 'FILLER_COURSE_LEVEL_1':
-                    $type_string = 'FILLER_COURSE_LEVEL_1';
+                    $type_string = 'FILLERS COURSE';
                     break;
                 case 'COURSE_FILLERS_LEVEL_2':
                 case 'FILLER_COURSE_LEVEL_2':
@@ -37370,8 +37747,8 @@ class MainController extends AppPluginController {
             'LEVEL3' => 'ADVANCED TECHNIQUES MEDICAL',
             'LEVEL 3' => 'ADVANCED TECHNIQUES MEDICAL',
             'ADVANCED TECHNIQUES MEDICAL' => 'ADVANCED TECHNIQUES MEDICAL',
-            'COURSE_FILLERS_LEVEL_1' => 'FILLER_COURSE_LEVEL_1',
-            'FILLER_COURSE_LEVEL_1' => 'FILLER_COURSE_LEVEL_1',
+            'COURSE_FILLERS_LEVEL_1' => 'FILLERS COURSE',
+            'FILLER_COURSE_LEVEL_1' => 'FILLERS COURSE',
             'COURSE_FILLERS_LEVEL_2' => 'FILLER_COURSE_LEVEL_2',
             'FILLER_COURSE_LEVEL_2' => 'FILLER_COURSE_LEVEL_2',
             'COURSE_OTHER' => 'UNKNOWN',
