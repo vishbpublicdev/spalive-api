@@ -56,7 +56,7 @@ class PaymentsController extends AppPluginController{
     private $ship_cost_vial = 4000;
     private $training_basic = 89500;
     private $training_advanced = 89500;
-    private $level_3_fillers = 150000;//level 3 fillers
+    private $level_3_fillers = 149500;//level 3 fillers
     private $level_3_medical = 99500;//level 3 medical
     private $level_1_to_1 = 19999;//level 1 to 1
     private $emergencyPhone = "9035301512";
@@ -132,6 +132,11 @@ class PaymentsController extends AppPluginController{
     private function sanitizePurchasePromoCode(string $promoCode): string
     {
         return strtoupper(trim($promoCode));
+    }
+
+    private function isMdSubscriptionType(string $subscriptionType): bool
+    {
+        return stripos($subscriptionType, 'MD') !== false;
     }
 
     private function isAllPromoAllowedForCategory($entCode, $category, $courseCategories): bool
@@ -884,7 +889,7 @@ class PaymentsController extends AppPluginController{
         $this->loadModel('SpaLiveV1.DataPromoCodes');
 
         // Course checkouts: do not pass Stripe processing fee to the customer (display or charge).
-        $courseCategoriesNoStripePass = ['REGISTER', 'TRAINING', 'LEVEL3', 'OTCOURSE'];
+        $courseCategoriesNoStripePass = ['REGISTER', 'TRAINING', 'LEVEL3', 'OTCOURSE','FILLERS'];
 
         $ent_codes = $this->DataPromoCodes->find()
         ->where(['DataPromoCodes.deleted' => 0,'DataPromoCodes.active' => 1,'DataPromoCodes.code' => strtoupper($code)])->first();
@@ -5936,8 +5941,8 @@ class PaymentsController extends AppPluginController{
                             <div style='width:210mm; height: 97mm; position:absolute; z-index: 2;'>
                                 
                                 <div style='position: absolute;left: 10mm;top: 20mm; max-width: 80mm; background-color: white'>".$payers_name_and_address."</div>
-                                <div style='position: absolute;left: 55mm;top: 41.5mm; max-width: 35mm; background-color: white'>".$payer_tin."</div>                                
-                                <div style='position: absolute;left: 10mm;top: 41.5mm; max-width: 35mm; background-color: white'>".$receipt_tin."</div>                                
+                                <div style='position: absolute;left: 55mm;top: 41.5mm; max-width: 35mm; background-color: white'>".$receipt_tin."</div>                                
+                                <div style='position: absolute;left: 10mm;top: 41.5mm; max-width: 35mm; background-color: white'>".$payer_tin."</div>                                
                                 <div style='position: absolute;left: 10mm;top: 53mm; max-width: 80mm; background-color: white'>".$recipient_name."</div>
                                 <div style='position: absolute;left: 10mm;top: 64mm; max-width: 80mm; background-color: white'>".$recipient_street."</div>
                                 <div style='position: absolute;left: 10mm;top: 72.5mm; max-width: 80mm; background-color: white'>".$recipient_city."</div>
@@ -7926,7 +7931,7 @@ class PaymentsController extends AppPluginController{
                             $token = env('TWILIO_AUTH_TOKEN');
                             $twilio = new Client($sid, $token);
 
-                            $twilio->messages->create('+1' . '9518168768', [
+                            $twilio->messages->create('+1' . '7738761577', [
                                 'messagingServiceSid' => 'MG65978a5932f4ba9dd465e05d7b22195e',
                                 'body' => 'New weight loss purchase: ' . USER_NAME . ' ' . USER_LNAME . ' (' . USER_PHONE . ')',
                             ]);
@@ -8492,6 +8497,7 @@ class PaymentsController extends AppPluginController{
         $this->loadModel('SpaLiveV1.DataSubscriptionPayments');
         $this->loadModel('SpaLiveV1.DataSubscriptionsPaymentsError');
         $this->loadModel('SpaLiveV1.SysUsers');
+        $this->loadModel('SpaLiveV1.SysUserAdmin');
 
         \Stripe\Stripe::setApiKey(Configure::read('App.stripe_secret_key'));
         $stripe = new \Stripe\StripeClient(Configure::read('App.stripe_secret_key'));
@@ -8642,14 +8648,16 @@ class PaymentsController extends AppPluginController{
                     'state' => USER_STATE,
                 ]);
 
+                $isFillersSubscription = $this->SysUserAdmin->subscriptionContextIncludesFillers($subscription_type, (string)$main_service, '');
                 if(!$s_entity->hasErrors()) {
 
                     $id = $this->DataSubscriptions->save($s_entity);
                     $ent_user = $this->SysUsers->find()->where(['SysUsers.id' => USER_ID])->first();
 
-                    $this->loadModel('SpaLiveV1.SysUserAdmin');
                     $paymentMdId = (int)($ent_user->md_id ?? 0);
-                    if (stripos($subscription_type, 'MD') !== false) {
+                    if ($isFillersSubscription) {
+                        $paymentMdId = $this->SysUserAdmin->getAssignedDoctorForContext((int)USER_ID, ['isFillers' => true]);
+                    } elseif ($this->isMdSubscriptionType($subscription_type)) {
                         $paymentMdId = $this->SysUserAdmin->getAssignedDoctorInjector((int)USER_ID);
                     }
 
@@ -8700,7 +8708,7 @@ class PaymentsController extends AppPluginController{
                     }
                 }
     
-                if (stripos($subscription_type, 'MD') !== false) {
+                if ($this->isMdSubscriptionType($subscription_type) && !$isFillersSubscription) {
                     $injector = $this->SysUsers->find()->where(['SysUsers.id' => USER_ID, 'SysUsers.md_id' => 0])->first();
                     if (!empty($injector)) {
                         $this->loadModel('SpaLiveV1.SysUserAdmin');
@@ -8796,7 +8804,7 @@ class PaymentsController extends AppPluginController{
                             $token = env('TWILIO_AUTH_TOKEN');
                             $twilio = new Client($sid, $token);
 
-                            $twilio->messages->create('+1' . '9518168768', [
+                            $twilio->messages->create('+1' . '7738761577', [
                                 'messagingServiceSid' => 'MG65978a5932f4ba9dd465e05d7b22195e',
                                 'body' => 'The injector ' . USER_NAME . ' ' . USER_LNAME . ' (' . USER_PHONE . ') from another school has paid the subscription.',
                             ]);
@@ -13863,7 +13871,7 @@ foreach ($ent_query_dispute as $key => $value) {
 
         // Check if any products are in skin product categories
         $skin_products = array_filter($purchase_details, function($detail) {
-            return in_array($detail['Product']['category'], ['ACNE PRODUCTS', 'BRIGHTENING PRODUCTS', 'ANTI-AGING PRODUCTS', 'BACKBAR PRODUCTS']);
+            return in_array($detail['Product']['category'], ['ACNE PRODUCTS', 'BRIGHTENING PRODUCTS', 'ANTI-AGING PRODUCTS', 'BACKBAR PRODUCTS', 'SKIN PRODUCTS', 'SKIN KITS']);
         });
 
         if (empty($skin_products)) {

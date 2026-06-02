@@ -5,6 +5,12 @@ use Cake\ORM\Table;
 
 class SysUserAdminTable extends Table
 {
+    /**
+     * Config key used to route FILLERS contexts to a dedicated medical director.
+     * It must contain a sys_users_admin.id for an active DOCTOR user.
+     */
+    private const FILLERS_DOCTOR_ENV_KEY = 'FILLERS_MD_ADMIN_ID';
+
     public function initialize(array $config) : void
     {
         $this->setTable('sys_users_admin'); // Name of the table in the database, if absent convention assumes lowercase version of file prefix
@@ -43,6 +49,24 @@ class SysUserAdminTable extends Table
         }
 
         return (int)$doctorIds[array_rand($doctorIds)];
+    }
+
+    /**
+     * Whether this sys_users_admin row is an active eligible medical director assignee.
+     */
+    private function isEligibleDoctorAdmin(int $adminId): bool
+    {
+        if ($adminId <= 0) {
+            return false;
+        }
+
+        return $this->find()
+                ->where([
+                    'SysUserAdmin.id' => $adminId,
+                    'SysUserAdmin.user_type' => 'DOCTOR',
+                    'SysUserAdmin.deleted' => 0,
+                ])
+                ->count() > 0;
     }
 
     /**
@@ -109,7 +133,8 @@ class SysUserAdminTable extends Table
     }
 
     /**
-     * Returns sys_users.md_id for this user. If zero, assigns a random active DOCTOR, persists to sys_users, and returns it.
+     * Returns sys_users.md_id for this user when it points to an active DOCTOR admin; otherwise assigns
+     * a random active DOCTOR (including replacing stale/non-DOCTOR/deleted admins), persists to sys_users, and returns it.
      * Used for injectors (e.g. treatments: same value as data_treatment.assigned_doctor via getRandomDoctor).
      *
      * @param int $id sys_users.id
@@ -131,9 +156,9 @@ class SysUserAdminTable extends Table
             return 0;
         }
 
-        $mdId = (int)$row['md_id'];
-        if ($mdId > 0) {
-            return $mdId;
+        $storedMd = (int)$row['md_id'];
+        if ($storedMd > 0 && $this->isEligibleDoctorAdmin($storedMd)) {
+            return $storedMd;
         }
 
         $newMd = $this->pickRandomEligibleDoctorId();
@@ -141,11 +166,20 @@ class SysUserAdminTable extends Table
             return 0;
         }
 
-        // Only set when still unassigned (avoids overwriting a concurrent assignment).
-        $upd = $this->getConnection()->execute(
-            'UPDATE sys_users SET md_id = ? WHERE id = ? AND deleted = 0 AND IFNULL(md_id, 0) = 0',
-            [$newMd, $id]
-        );
+        // Unassigned: only set when still zero (avoids overwriting a concurrent assignment).
+        // Stale md_id: replace only while row still holds the same stored value (avoids clobbering a concurrent fix).
+        if ($storedMd <= 0) {
+            $upd = $this->getConnection()->execute(
+                'UPDATE sys_users SET md_id = ? WHERE id = ? AND deleted = 0 AND IFNULL(md_id, 0) = 0',
+                [$newMd, $id]
+            );
+        } else {
+            $upd = $this->getConnection()->execute(
+                'UPDATE sys_users SET md_id = ? WHERE id = ? AND deleted = 0 AND md_id = ?',
+                [$newMd, $id, $storedMd]
+            );
+        }
+
         if ($upd->rowCount() > 0) {
             return $newMd;
         }
@@ -155,7 +189,72 @@ class SysUserAdminTable extends Table
             [$id]
         );
         $rowAfter = $stmt->fetch('assoc');
+        if ($rowAfter === false) {
+            return 0;
+        }
 
-        return $rowAfter === false ? 0 : (int)$rowAfter['md_id'];
+        $afterMd = (int)$rowAfter['md_id'];
+
+        return $this->isEligibleDoctorAdmin($afterMd) ? $afterMd : 0;
+    }
+
+    /**
+     * Whether subscription strings include Fillers (dedicated fillers MD applies).
+     */
+    public function subscriptionContextIncludesFillers(string $subscriptionType, string $mainService = '', string $addonsServices = ''): bool
+    {
+        $normalizedType = strtoupper(trim($subscriptionType));
+        if (strpos($normalizedType, 'FILLERS') !== false) {
+            return true;
+        }
+        $services = strtoupper(trim($mainService . ',' . $addonsServices));
+
+        return strpos($services, 'FILLERS') !== false;
+    }
+
+    /**
+     * Returns configured active FILLERS doctor id, or 0 when unavailable/invalid.
+     */
+    public function getFillersDoctorId(): int
+    {
+        $configuredId = (int)env(self::FILLERS_DOCTOR_ENV_KEY, '0');
+        if ($configuredId <= 0) {
+            return 0;
+        }
+
+        return $this->isEligibleDoctorAdmin($configuredId) ? $configuredId : 0;
+    }
+
+    /**
+     * Assign doctor by business context.
+     * - FILLERS contexts use configured dedicated MD when available.
+     * - Non-FILLERS keep current assignment behavior.
+     *
+     * @param int $injectorId sys_users.id
+     * @param array<string,mixed> $context
+     * @return int sys_users_admin.id
+     */
+    public function getAssignedDoctorForContext(int $injectorId, array $context = []): int
+    {
+        $injectorId = (int)$injectorId;
+        if ($injectorId <= 0) {
+            return 0;
+        }
+
+        $isFillers = !empty($context['isFillers']);
+        if ($isFillers) {
+            $fillersMdId = $this->getFillersDoctorId();
+            if ($fillersMdId > 0) {
+                // Always persist fillers MD when configured (overrides any previous eligible MD).
+                $this->getConnection()->execute(
+                    'UPDATE sys_users SET md_id = ? WHERE id = ? AND deleted = 0 AND IFNULL(md_id, 0) <> ?',
+                    [$fillersMdId, $injectorId, $fillersMdId]
+                );
+
+                return $fillersMdId;
+            }
+        }
+
+        return $this->getAssignedDoctorInjector($injectorId);
     }
 }

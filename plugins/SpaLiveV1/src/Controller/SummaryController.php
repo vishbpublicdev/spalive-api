@@ -189,6 +189,9 @@ class SummaryController extends AppPluginController{
         //treatments controller para separar los tratamientos
         $Treatments = new TreatmentsController();
             
+        $phones = $this->emergencyPhoneOverrideForInjectorMd176($user);
+        $this->emergencyPhone = $phones['emergencyPhone'];
+        $this->emergencyPhone2 = $phones['emergencyPhone2'];
         $this->set('emergencyPhone', $this->emergencyPhone);
         $patient_consent = false;
         $patient_consent_iv_therapy = false;
@@ -2385,6 +2388,9 @@ class SummaryController extends AppPluginController{
 
         $Treatments = new TreatmentsController();
 
+        $phones = $this->emergencyPhoneOverrideForInjectorMd176($user);
+        $this->emergencyPhone = $phones['emergencyPhone'];
+        $this->emergencyPhone2 = $phones['emergencyPhone2'];
         $this->set('emergencyPhone', $this->emergencyPhone);
         $this->set('emergencyPhone2', $this->emergencyPhone2);
 
@@ -6386,6 +6392,9 @@ class SummaryController extends AppPluginController{
 
         ////NTsts
 
+        $phones = $this->emergencyPhoneOverrideForInjectorMd176($user);
+        $this->emergencyPhone = $phones['emergencyPhone'];
+        $this->emergencyPhone2 = $phones['emergencyPhone2'];
         $this->set('emergencyPhone', $this->emergencyPhone);
         // $this->set('emergencyPhone2', $this->emergencyPhone);
 
@@ -7753,7 +7762,8 @@ class SummaryController extends AppPluginController{
                     $arr_options = [$cat_key];
                     if ($cat_key == 'LEVEL 1') $arr_options = ['LEVEL 1', 'MYSPALIVES_HYBRID_TOX_FILLER_COURSE','MYSPALIVE_S_HYBRID_TOX_FILLER_COURSE'];
                     if ($cat_key == 'LEVEL 2') $arr_options = ['LEVEL 2', 'LEVEL_TWO_DUAL_TOX_AND_DEMALL_FILLER'];
-                    if ($cat_key == 'FILLERS') $arr_options = ['FILLERS', 'LEVEL_TWO_DUAL_TOX_AND_DEMALL_FILLER','MYSPALIVES_HYBRID_TOX_FILLER_COURSE','MYSPALIVE_S_HYBRID_TOX_FILLER_COURSE'];
+                    if ($cat_key == 'FILLERS')  $arr_options = ['FILLERS', 'LEVEL_TWO_DUAL_TOX_AND_DEMALL_FILLER','MYSPALIVES_HYBRID_TOX_FILLER_COURSE','MYSPALIVE_S_HYBRID_TOX_FILLER_COURSE', 'LEVEL 3 FILLERS','FILLER_COURSE_LEVEL_1'];
+                    if ($cat_key == 'LEVEL 3 FILLERS') $arr_options = ['FILLERS', 'LEVEL_TWO_DUAL_TOX_AND_DEMALL_FILLER','MYSPALIVES_HYBRID_TOX_FILLER_COURSE','MYSPALIVE_S_HYBRID_TOX_FILLER_COURSE', 'LEVEL 3 FILLERS','FILLER_COURSE_LEVEL_1'];
                     // Obtener todos los entrenamientos del usuario con información del curso
                     $ent_data_training = $this->DataTrainings->find()->select(['CatTrainigs.id','DataTrainings.id'])->join([
                         'CatTrainigs' => ['table' => 'cat_trainings', 'type' => 'INNER', 'conditions' => 'CatTrainigs.id = DataTrainings.training_id'],
@@ -7763,11 +7773,17 @@ class SummaryController extends AppPluginController{
                         $service_type['training_id'] = $ent_data_training['CatTrainigs']['id'];
                         $service_type['data_training_id'] = $ent_data_training['id'];
                     } else {
+
+                        $arr_ot_options = [$service_type['name_key']];
+                        if ($service_type['name_key'] == 'NEUROTOXINS_BASIC') $arr_ot_options = ['NEUROTOXINS BASIC', 'NEUROTOXINS BASIC','BOTH NEUROTOXINS','BOTH_NEUROTOXINS'];
+                        if ($service_type['name_key'] == 'NEUROTOXINS_ADVANCED') $arr_ot_options = ['NEUROTOXINS_ADVANCED', 'NEUROTOXINS ADVANCED','BOTH NEUROTOXINS','BOTH_NEUROTOXINS'];
+
                         $this->loadModel('SpaLiveV1.DataCourses');
                         $ot_course_data = $this->DataCourses->find()->select(['DataCourses.id'])->join([
                             'CatCourses' => ['table' => 'cat_courses', 'type' => 'INNER', 'conditions' => 'CatCourses.id = DataCourses.course_id'],
-                        ])->where(['DataCourses.user_id' => USER_ID,'DataCourses.deleted' => 0,'DataCourses.status' => 'DONE','CatCourses.type' => $service_type['name_key']])->first();
-                         
+                        ])->where(['DataCourses.user_id' => USER_ID,'DataCourses.deleted' => 0,'DataCourses.status' => 'DONE','CatCourses.type IN' => $arr_ot_options])->first();
+
+                        
                         if (!empty($ot_course_data)) {
                             $service_type['data_course_id'] = $ot_course_data->id;
                         }
@@ -7800,29 +7816,30 @@ class SummaryController extends AppPluginController{
 
 
         // Solo aparece advanced techniques si tiene advanced neurotoxins en done
-
-        if($map_services['ADVANCED NEUROTOXINS']['status'] != 'DONE'){
+        if (isset($map_services['ADVANCED NEUROTOXINS'])
+            && ($map_services['ADVANCED NEUROTOXINS']['status'] ?? '') != 'DONE'
+        ) {
             unset($map_services['ADVANCED TECHNIQUES NEUROTOXINS']);
         }
 
-        $bn = $map_services["BASIC NEUROTOXINS"];
-        $an = $map_services["ADVANCED NEUROTOXINS"];
+        if (isset($map_services['BASIC NEUROTOXINS'], $map_services['ADVANCED NEUROTOXINS'])) {
+            $bn = $map_services['BASIC NEUROTOXINS'];
+            $an = $map_services['ADVANCED NEUROTOXINS'];
 
-        if($bn['status'] == 'NOT_STARTED' && $an['status'] == 'NOT_STARTED'){
-            unset($map_services["BASIC NEUROTOXINS"]);
-            unset($map_services["ADVANCED NEUROTOXINS"]);
+            if ($bn['status'] == 'NOT_STARTED' && $an['status'] == 'NOT_STARTED') {
+                unset($map_services['BASIC NEUROTOXINS']);
+                unset($map_services['ADVANCED NEUROTOXINS']);
 
-            $map_services["NEUROTOXINS"] = array(
-                'type'       => 'NEUROTOXINS',
-                'show_check' => false,
-                'title'      => 'Basic Neurotoxin treatments',
-                'status'     => 'NOT_STARTED',
-            );
+                $map_services['NEUROTOXINS'] = array(
+                    'type'       => 'NEUROTOXINS',
+                    'show_check' => false,
+                    'title'      => 'Basic Neurotoxin treatments',
+                    'status'     => 'NOT_STARTED',
+                );
+            }
         }
 
-         if($bn['status'] == 'DONE') {
-
-         }
+        $map_services = $this->alignHybridInjectorSubscriptionTrainings($map_services, $user_id);
 
         $map_services = $this->dedupeServices($map_services);
 
@@ -7833,6 +7850,109 @@ class SummaryController extends AppPluginController{
         }
 
         return $fixed_services;
+    }
+
+    /**
+     * Hybrid / dual courses share subscription agreements with the user's level-1 path.
+     * Advanced and fillers rows must point at that training so get_agreements_for_training works.
+     */
+    private function alignHybridInjectorSubscriptionTrainings(array $map_services, $user_id): array
+    {
+        $basicSubscriptionTraining = $this->findInjectorBasicSubscriptionTraining($user_id);
+        if ($basicSubscriptionTraining === null) {
+            return $map_services;
+        }
+
+        $basicIsHybrid = $this->isInjectorHybridBasicLevel($basicSubscriptionTraining['level']);
+
+        if (isset($map_services['ADVANCED NEUROTOXINS'])
+            && ($map_services['ADVANCED NEUROTOXINS']['status'] ?? '') === 'SUBSCRIBE'
+        ) {
+            $advancedTrainingId = (int)($map_services['ADVANCED NEUROTOXINS']['training_id'] ?? 0);
+            $advancedLevel = $advancedTrainingId > 0
+                ? $this->getCatTrainingLevel($advancedTrainingId)
+                : null;
+
+            if ($this->isInjectorAdvancedEquivalentLevel($advancedLevel)) {
+                $map_services['ADVANCED NEUROTOXINS']['training_id'] = $basicSubscriptionTraining['training_id'];
+                $map_services['ADVANCED NEUROTOXINS']['data_training_id'] = $basicSubscriptionTraining['data_training_id'];
+            }
+        }
+
+        if (isset($map_services['FILLERS'])
+            && ($map_services['FILLERS']['status'] ?? '') === 'MSL'
+            && $basicIsHybrid
+        ) {
+            $map_services['FILLERS']['status'] = 'SUBSCRIBE';
+            $map_services['FILLERS']['training_id'] = $basicSubscriptionTraining['training_id'];
+            $map_services['FILLERS']['data_training_id'] = $basicSubscriptionTraining['data_training_id'];
+        }
+
+        return $map_services;
+    }
+
+    private function findInjectorBasicSubscriptionTraining($user_id)
+    {
+        $hybridBasicLevels = ['MYSPALIVES_HYBRID_TOX_FILLER_COURSE', 'MYSPALIVE_S_HYBRID_TOX_FILLER_COURSE'];
+        $levelSearchGroups = [$hybridBasicLevels, ['LEVEL 1']];
+
+        $this->loadModel('SpaLiveV1.DataTrainings');
+
+        foreach ($levelSearchGroups as $levels) {
+            $ent_data_training = $this->DataTrainings->find()
+                ->select(['CatTrainigs.id', 'CatTrainigs.level', 'DataTrainings.id'])
+                ->join([
+                    'CatTrainigs' => [
+                        'table' => 'cat_trainings',
+                        'type' => 'INNER',
+                        'conditions' => 'CatTrainigs.id = DataTrainings.training_id',
+                    ],
+                ])
+                ->where([
+                    'CatTrainigs.level IN' => $levels,
+                    'DataTrainings.user_id' => $user_id,
+                    'DataTrainings.deleted' => 0,
+                    'DataTrainings.attended' => 1,
+                    'CatTrainigs.deleted' => 0,
+                ])
+                ->order(['DataTrainings.id' => 'DESC'])
+                ->first();
+
+            if (!empty($ent_data_training)) {
+                return [
+                    'training_id' => $ent_data_training['CatTrainigs']['id'],
+                    'data_training_id' => $ent_data_training['id'],
+                    'level' => $ent_data_training['CatTrainigs']['level'],
+                ];
+            }
+        }
+
+        return null;
+    }
+
+    private function getCatTrainingLevel($training_id)
+    {
+        if (empty($training_id)) {
+            return null;
+        }
+
+        $this->loadModel('SpaLiveV1.CatTrainigs');
+        $training = $this->CatTrainigs->find()
+            ->select(['level'])
+            ->where(['id' => $training_id, 'deleted' => 0])
+            ->first();
+
+        return !empty($training) ? $training->level : null;
+    }
+
+    private function isInjectorHybridBasicLevel($level)
+    {
+        return in_array($level, ['MYSPALIVES_HYBRID_TOX_FILLER_COURSE', 'MYSPALIVE_S_HYBRID_TOX_FILLER_COURSE'], true);
+    }
+
+    private function isInjectorAdvancedEquivalentLevel($level)
+    {
+        return in_array($level, ['LEVEL 2', 'LEVEL_TWO_DUAL_TOX_AND_DEMALL_FILLER'], true);
     }
 
     private function dedupeServices($services): array
@@ -7998,7 +8118,8 @@ class SummaryController extends AppPluginController{
                             ])
                             ->first();
                         if (empty($subscription_md)) {
-                            $status = 'MD';
+                            // Use SUBSCRIBE so the app opens the unified agreements screen (MSL + MD together)
+                            $status = 'SUBSCRIBE';
                         }
                     }
                     $agreement_msl = null;
@@ -8123,7 +8244,8 @@ class SummaryController extends AppPluginController{
                         ])
                         ->first();
                     if (empty($subscription_md)) {
-                        $status = 'MD';
+                        // Use SUBSCRIBE so the app opens the unified agreements screen (MSL + MD together)
+                        $status = 'SUBSCRIBE';
                     }
                 }
 
