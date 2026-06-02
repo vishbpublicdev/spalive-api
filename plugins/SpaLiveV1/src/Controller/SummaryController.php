@@ -7745,7 +7745,7 @@ class SummaryController extends AppPluginController{
             // $service_type['data_course_id'] = 0;
 
             if($service_type['find'] == 'OTHER TREATMENTS'){
-                $status = $service_type['status']; // Usar el status que ya calculamos
+                $status = $this->normalizeInjectorServiceSubscriptionStatus($service_type['status']);
             } else {
                 $service_type['training_id'] = 0;
                 $service_type['data_training_id'] = 0;
@@ -7755,10 +7755,7 @@ class SummaryController extends AppPluginController{
                     $search_helper,                
                 );  // NOT_STARTED, WAITING, STUDYING, REJECTED, MSL, MD, DONE, SUBSCRIBE
 
-                // App expects SUBSCRIBE (unified flow), not legacy MSL/MD step labels
-                if (in_array($status, ['MSL', 'MD'], true)) {
-                    $status = 'SUBSCRIBE';
-                }
+                $status = $this->normalizeInjectorServiceSubscriptionStatus($status);
 
                 if ($status == 'SUBSCRIBE') {
                     $cat_key = $service_type['cat_key'];
@@ -7850,10 +7847,23 @@ class SummaryController extends AppPluginController{
         $fixed_services = array();
 
         foreach($map_services as $key => $value){
+            $value['status'] = $this->normalizeInjectorServiceSubscriptionStatus($value['status'] ?? '');
             $fixed_services[] = $value;
         }
 
         return $fixed_services;
+    }
+
+    /**
+     * Legacy ServicesHelper steps used MSL/MD; summary_CP exposes SUBSCRIBE only.
+     */
+    private function normalizeInjectorServiceSubscriptionStatus($status)
+    {
+        $status = is_string($status) ? trim($status) : '';
+        if (in_array($status, ['MSL', 'MD'], true)) {
+            return 'SUBSCRIBE';
+        }
+        return $status;
     }
 
     /**
@@ -7884,7 +7894,7 @@ class SummaryController extends AppPluginController{
         }
 
         if (isset($map_services['FILLERS'])
-            && ($map_services['FILLERS']['status'] ?? '') === 'MSL'
+            && in_array($map_services['FILLERS']['status'] ?? '', ['SUBSCRIBE', 'MSL', 'MD'], true)
             && $basicIsHybrid
         ) {
             $map_services['FILLERS']['status'] = 'SUBSCRIBE';

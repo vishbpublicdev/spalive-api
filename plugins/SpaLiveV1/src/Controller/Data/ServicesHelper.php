@@ -636,7 +636,7 @@ class ServicesHelperData extends AppPluginController
                     ->first();
 
                     if(empty($subscription_msl)){
-                        return 'MSL';
+                        return 'SUBSCRIBE';
                     }
 
                     $subscription_md = $this->DataSubscriptions->find()
@@ -653,7 +653,7 @@ class ServicesHelperData extends AppPluginController
                     ->first();
 
                     if(empty($subscription_md)){
-                        return 'MD';
+                        return 'SUBSCRIBE';
                     }
 
                     return 'DONE';
@@ -744,7 +744,7 @@ class ServicesHelperData extends AppPluginController
                 ->first();
 
                 if(empty($subscription_msl)){
-                    return 'MSL';
+                    return 'SUBSCRIBE';
                 }
 
                 if($treatment->require_mdsub == 1){
@@ -762,7 +762,7 @@ class ServicesHelperData extends AppPluginController
                     ->first();
 
                     if(empty($subscription_md)){
-                        return 'MD';
+                        return 'SUBSCRIBE';
                     }
                 }
 
@@ -787,7 +787,7 @@ class ServicesHelperData extends AppPluginController
             ->first();
 
             if(empty($subscription_msl)){
-                return 'MSL';
+                return 'SUBSCRIBE';
             }
 
             if($treatment->require_mdsub == 1){
@@ -805,7 +805,7 @@ class ServicesHelperData extends AppPluginController
                 ->first();
 
                 if(empty($subscription_md)){
-                    return 'MD';
+                    return 'SUBSCRIBE';
                 }
             }
 
