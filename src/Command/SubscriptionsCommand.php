@@ -267,7 +267,7 @@ class SubscriptionsCommand extends Command{
                 );
                     //$ent_user = $this->SysUsers->find()->where(['SysUsers.id' => $row->user_id])->first();
                     //All records for Marie
-                    $md_id = $this->get_doctor($row['user_id'], $row['subscription_type']);
+                    $md_id = $this->get_doctor($row['user_id'], $row['subscription_type'], $row, false);
                 $c_entity = $this->DataSubscriptionPayments->newEntity([
                     'uid'   => Text::uuid(),
                     'subscription_id'  => $row->id,
@@ -409,7 +409,7 @@ class SubscriptionsCommand extends Command{
             $amountCents = 0;
         }
 
-        $md_id = $this->get_doctor($user_id, $row['subscription_type']);
+        $md_id = $this->get_doctor($user_id, $row['subscription_type'], $row);
         $c_entity = $this->DataSubscriptionPayments->newEntity([
             'uid' => Text::uuid(),
             'subscription_id' => $subscription_id,
@@ -535,7 +535,7 @@ class SubscriptionsCommand extends Command{
             }    
             //$ent_user = $this->SysUsers->find()->where(['SysUsers.id' => $user_id])->first();
             //All records for Marie
-            $md_id = $this->get_doctor($user_id, $row['subscription_type']);
+            $md_id = $this->get_doctor($user_id, $row['subscription_type'], $row);
             $c_entity = $this->DataSubscriptionPayments->newEntity([
                 'uid'   => Text::uuid(),
                 'subscription_id'  => $subscription_id,
@@ -1085,7 +1085,7 @@ class SubscriptionsCommand extends Command{
                 }    
                 //$ent_user = $this->SysUsers->find()->where(['SysUsers.id' => $user_id])->first();
                 //All records for Marie
-                $md_id = $this->get_doctor($user_id, $row['subscription_type']);
+                $md_id = $this->get_doctor($user_id, $row['subscription_type'], $row);
                 $c_entity = $this->DataSubscriptionPayments->newEntity([
                     'uid'   => Text::uuid(),
                     'subscription_id'  => $subscription_id,
@@ -1140,7 +1140,7 @@ class SubscriptionsCommand extends Command{
         }else{
             $total = $row['total'];
 
-            $md_id = $this->get_doctor($user_id, $row['subscription_type']);
+            $md_id = $this->get_doctor($user_id, $row['subscription_type'], $row);
 
             $c_entity = $this->DataSubscriptionPayments->newEntity([
                 'uid'   => Text::uuid(),
@@ -1428,22 +1428,74 @@ class SubscriptionsCommand extends Command{
         
     }
 
-    private function get_doctor($injector_id, $type){
-
-        $posicion = strpos($type, 'msl');
-
-        if($posicion !== false){
+    /**
+     * Resolves md_id for subscription payment rows.
+     * Fillers subscriptions: on successful charge, always sync sys_users.md_id to FILLERS_MD_ADMIN_ID
+     * via getAssignedDoctorForContext (legacy wrong MD is corrected on renewal).
+     * Other MD subscriptions: keep existing md_id when set; otherwise assign on charge.
+     *
+     * @param array|\ArrayAccess|null $row Subscription row (main_service / addons_services for fillers detection)
+     * @param bool $assignIfMissing When false, do not mutate sys_users (e.g. declined charge); still return best id for the row
+     */
+    private function get_doctor($injector_id, $type, $row = null, $assignIfMissing = true)
+    {
+        $posicion = strpos((string) $type, 'msl');
+        if ($posicion !== false) {
             return 0;
         }
 
         $this->loadModel('SpaLiveV1.SysUsers');
-        $assigned = $this->SysUsers->getConnection()->query( "SELECT U.md_id, U.created FROM sys_users U WHERE U.deleted = 0  and type in ('injector') and U.id = {$injector_id} order by id desc limit 1 ")->fetchAll('assoc');
-
-        if(empty($assigned)){
+        $injectorId = (int) $injector_id;
+        if ($injectorId <= 0) {
             return 0;
         }
 
-        return $assigned[0]['md_id'];
+        $assigned = $this->SysUsers->getConnection()
+            ->execute(
+                'SELECT U.md_id FROM sys_users U WHERE U.deleted = 0 AND U.type IN (\'injector\') AND U.id = ? ORDER BY U.id DESC LIMIT 1',
+                [$injectorId]
+            )
+            ->fetchAll('assoc');
+
+        if (empty($assigned)) {
+            return 0;
+        }
+
+        $mainService = '';
+        $addonsServices = '';
+        if ($row !== null) {
+            $mainService = (string) ($row['main_service'] ?? '');
+            $addonsServices = (string) ($row['addons_services'] ?? '');
+        }
+
+        $isFillersContext = $this->SysUserAdmin->subscriptionContextIncludesFillers((string) $type, $mainService, $addonsServices);
+
+        if ($isFillersContext) {
+            if ($assignIfMissing) {
+                return (int) $this->SysUserAdmin->getAssignedDoctorForContext($injectorId, ['isFillers' => true]);
+            }
+
+            $fillersMd = (int) $this->SysUserAdmin->getFillersDoctorId();
+
+            return $fillersMd > 0 ? $fillersMd : (int) ($assigned[0]['md_id'] ?? 0);
+        }
+
+        $mdId = (int) ($assigned[0]['md_id'] ?? 0);
+        if ($mdId > 0) {
+            return $mdId;
+        }
+
+        if (!$assignIfMissing) {
+            return 0;
+        }
+
+        $typeUpper = strtoupper((string) $type);
+
+        if (strpos($typeUpper, 'MD') !== false) {
+            return (int) $this->SysUserAdmin->getAssignedDoctorInjector($injectorId);
+        }
+
+        return 0;
     }
 
     private function send_trial_hold_email($str_email){
@@ -1491,7 +1543,7 @@ class SubscriptionsCommand extends Command{
     }
 
     private function email_relations($row){
-
+        return;
         $isDev = env('IS_DEV', false);
 
 

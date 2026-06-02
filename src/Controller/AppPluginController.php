@@ -71,6 +71,37 @@ class AppPluginController extends Controller
         return $result;
     }
 
+    /**
+     * When an injector is assigned to medical director user id 176, API responses must use that MD's emergency line.
+     * Otherwise returns the standard emergency numbers (same defaults as SummaryController).
+     *
+     * @param array $user Token payload from AppToken::validateToken (expects user_role, user_id).
+     * @return array{emergencyPhone: string, emergencyPhone2: string}
+     */
+    protected function emergencyPhoneOverrideForInjectorMd176(array $user): array
+    {
+        $defaults = [
+            'emergencyPhone' => '(469) 277 0897, (847) 477 5791',
+            'emergencyPhone2' => '(847) 477 5791,(812) 322 8388',
+        ];
+        if (($user['user_role'] ?? '') !== 'injector') {
+            return $defaults;
+        }
+        $this->loadModel('SpaLiveV1.SysUsers');
+        $injector = $this->SysUsers->find()
+            ->select(['md_id'])
+            ->where(['SysUsers.id' => $user['user_id'], 'SysUsers.deleted' => 0])
+            ->first();
+        if ($injector === null || (int)$injector->md_id !== 176) {
+            return $defaults;
+        }
+        $display = '(814) 933 2450';
+        // Leading comma: mobile client reads split(',')[1], so we need two segments without duplicating the number.
+        return [
+            'emergencyPhone' => ',' . $display,
+            'emergencyPhone2' => $display,
+        ];
+    }
 
     public function send($str_message, $data = array(), $array_devices_ids = array()){
         $this->loadModel('SpaLiveV1.ApiDevice');

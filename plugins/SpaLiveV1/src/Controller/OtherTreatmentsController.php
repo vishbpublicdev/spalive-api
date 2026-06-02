@@ -457,10 +457,12 @@ class OtherTreatmentsController extends AppPluginController{
         $this->set('total', number_format(($total / 100), 2, '.', ''));
 
         $this->set('installments', !empty($training->offer_id) ? true : false);
-        $this->set('installments_deferred', !empty($training->deferred_offer_id) ? true : false);
-
-
-      
+        $installments_deferred = !empty($training->deferred_offer_id);
+        $this->set('installments_deferred', $installments_deferred);
+        $this->set(
+            'installments_external_url',
+            $installments_deferred ? 'https://port2pay.com/Shop' : ''
+        );
 
         $this->success();
     }

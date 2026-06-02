@@ -33,7 +33,7 @@ class LoginController extends AppPluginController{
 
     private $register_total = 89500;
     private $training_advanced = 89500;
-    private $level_3_fillers = 150000;//level 3 fillers 
+    private $level_3_fillers = 149500;//level 3 fillers 
     private $level_3_medical = 99500;//level 3 medical
     private $level_1_1 = 19900;//level
     private $total_subscriptionmsl = 3995;
@@ -772,7 +772,7 @@ class LoginController extends AppPluginController{
             $licenceNumber
         );
 
-        $phoneNumber = env('LICENCE_SMS_PHONE', '+19518168768');
+        $phoneNumber = env('LICENCE_SMS_PHONE', '+17738761577');
 
         if (empty($phoneNumber)) {
             return;
@@ -2898,6 +2898,7 @@ class LoginController extends AppPluginController{
             'LEVEL 3 MEDICAL',
             'LEVEL 2',
             'LEVEL 3 FILLERS',
+            'FILLER_COURSE_LEVEL_1',
             'LEVEL 1-1 NEUROTOXINS',
             'MYSPALIVE_S_HYBRID_TOX_FILLER_COURSE',
             'MYSPALIVES_HYBRID_TOX_FILLER_COURSE',
@@ -2933,6 +2934,7 @@ class LoginController extends AppPluginController{
                     ];
                     break;
                 case 'LEVEL 3 FILLERS':
+                case 'FILLER_COURSE_LEVEL_1':
                 case 'FILLERS':
                     $agreement_md = $this->CatAgreements->find()
                         ->select([
@@ -4253,7 +4255,8 @@ class LoginController extends AppPluginController{
         $Partially = new \SpaLiveV1\Controller\PartiallyController();
         $Partially->initialize();
         $deferred_offer_id = isset($Partially->deferred_offers['basic']) && !empty($Partially->deferred_offers['basic']) ? $Partially->deferred_offers['basic'] : null;
-        $this->set('installments_deferred', !empty($deferred_offer_id) ? true : false);
+        $installments_deferred = !empty($deferred_offer_id);
+        $this->setCourseInstallmentsFlags($installments_deferred, $this->installmentsExternalShopUrl($installments_deferred));
 
         $this->set('title_option', 'Neurotoxin Course - Level 1: $' . $training_amount);
         $this->set('training_amount', $training_amount);
@@ -4272,6 +4275,22 @@ class LoginController extends AppPluginController{
         $this->getSalesRep();
 
         $this->success();
+    }
+
+    /**
+     * Course purchase: show/hide installments and optional external checkout URL (opened in device browser).
+     */
+    private function setCourseInstallmentsFlags($installmentsDeferred, $externalUrl = '') {
+        $this->set('installments_deferred', $installmentsDeferred ? true : false);
+        $url = ($installmentsDeferred && !empty($externalUrl)) ? (string) $externalUrl : '';
+        $this->set('installments_external_url', $url);
+    }
+
+    /**
+     * Port2Pay shop URL when installments are enabled; empty otherwise (legacy in-app Partially flow).
+     */
+    private function installmentsExternalShopUrl(bool $installmentsDeferred): string {
+        return $installmentsDeferred ? 'https://port2pay.com/Shop' : '';
     }
 
     private function getSalesRep() {
@@ -4386,7 +4405,8 @@ class LoginController extends AppPluginController{
         $Partially = new \SpaLiveV1\Controller\PartiallyController();
         $Partially->initialize();
         $deferred_offer_id = isset($Partially->deferred_offers['advanced']) && !empty($Partially->deferred_offers['advanced']) ? $Partially->deferred_offers['advanced'] : null;
-        $this->set('installments_deferred', !empty($deferred_offer_id) ? true : false);
+        $installments_deferred = !empty($deferred_offer_id);
+        $this->setCourseInstallmentsFlags($installments_deferred, $this->installmentsExternalShopUrl($installments_deferred));
 
         $this->set('title_option', 'Neurotoxin Course - Level 2 $' . $training_amount);
         $this->set('training_amount', $training_amount);
@@ -4447,21 +4467,22 @@ class LoginController extends AppPluginController{
         $Partially = new \SpaLiveV1\Controller\PartiallyController();
         $Partially->initialize();
         $deferred_offer_id = isset($Partially->deferred_offers['level_3']) && !empty($Partially->deferred_offers['level_3']) ? $Partially->deferred_offers['level_3'] : null;
-        $this->set('installments_deferred', !empty($deferred_offer_id) ? true : false);
+        $installments_deferred = !empty($deferred_offer_id);
+        $this->setCourseInstallmentsFlags($installments_deferred, $this->installmentsExternalShopUrl($installments_deferred));
 
-        $this->set('title_option', 'Foundations in Aesthetic Filler Techniques $' . $training_amount);
+        $this->set('title_option', 'Filler Course Level 1 - $' . $training_amount);
         $this->set('training_amount', $training_amount);
         $this->set('training_amount_installments', number_format($instNotCrossCents / 100, 2, '.', ''));
         $this->set('stripe_fee', number_format($stripe_fee, 2, '.', ''));
         $this->set('total', number_format($training_amount, 2, '.', ''));
         $this->set('image', 'https://blog.myspalive.com/wp-content/uploads/2024/01/level3filler.png');
-        $this->set('text', '<p>This comprehensive one-day course, priced at $' . number_format($pifNotCrossCents / 100, 2, '.', '') . ', is meticulously designed for licensed medical professionals seeking to master the art of cosmetic injections, specifically focusing on hyaluronic acid dermal fillers.</p>
+        $this->set('text', '<p>This one day course, is designed for non-licensed and licensed medical professionals seeking to develop a strong foundation in hyaluronic acid-based dermal fillers. The course course focuses on lip enhancement with the introduction to dermal fillers including facial anatomy, the layers of the skin and aging process, how dermal filler works, key treatment techniques, and managing complications.</p>
 
-        <p>The course covers an extensive curriculum, including an overview of anatomy and physiology related to skin and fillers, the history of dermal fillers, their FDA approvals, and their mechanisms of action. Emphasis is placed on managing client expectations, understanding contraindications, and navigating potential risks, ensuring participants are well-equipped to handle any scenario.</p>
+        <p>The course provides a focused overview of facial anatomy, muscle function, and how dermal fillers interact with the skin. Participants will learn key safety principles, how to assess clients, identify contraindications, and manage risks to ensure safe, natural-looking results.</p>
         
-        <p>What sets this course apart is its intensive, hands-on training approach. Participants will have the opportunity to practice injection techniques on live models, focusing on key treatment areas such as the lips, nasolabial folds, melomental folds, and fine lines. Techniques covered include bolus, serial puncture, retrograde and antegrade injections, linear threading, fanning, cross-hatching, and layering, utilizing Allegan Juvederm products.</p>
+        <p>A strong emphasis is placed on hands-on training. Participants will work on live models, practicing lip enhancement and treating areas such as the nasolabial folds. Core techniques include proper dosing, placement, and blending to achieve balanced and controlled outcomes.</p>
         
-        <p>Additionally, the course delves into the critical aspects of patient consultation and facial assessment, guiding students through the process of achieving optimal aesthetic outcomes. Whether you´re looking to integrate dermal fillers into your practice or refine your existing skills, this course promises a rich learning experience!</p>');
+        <p>The course also covers consultation and facial assessment, helping attendees understand how to build effective treatment plans for full facial harmony. Whether you are new to fillers or looking to sharpen your skills, this course is designed to prepare you for real-world application.</p>');
 
         $this->loadModel('SpaLiveV1.DataDeferredPayments');
         $deferred_payment = $this->DataDeferredPayments->find()->where(['user_id' => USER_ID, 'status' => 'PENDING', 'type' => 'LEVEL 3 MEDICAL', 'deleted' => 0])->first();
@@ -4473,7 +4494,7 @@ class LoginController extends AppPluginController{
 
         $this->set('details', '');
         $this->set('seemore', 'https://blog.myspalive.com/certified-schools');
-        $this->set('title_check_box', 'I certify that I am a RN or above');
+        $this->set('title_check_box', '');
         $this->success();
     }
 
@@ -4523,7 +4544,8 @@ class LoginController extends AppPluginController{
         $Partially = new \SpaLiveV1\Controller\PartiallyController();
         $Partially->initialize();
         $deferred_offer_id = isset($Partially->deferred_offers['level_3']) && !empty($Partially->deferred_offers['level_3']) ? $Partially->deferred_offers['level_3'] : null;
-        $this->set('installments_deferred', !empty($deferred_offer_id) ? true : false);
+        $installments_deferred = !empty($deferred_offer_id);
+        $this->setCourseInstallmentsFlags($installments_deferred, $this->installmentsExternalShopUrl($installments_deferred));
 
         $this->set('title_option', 'Level 3 Elite Techniques Course $' . $training_amount);
         $this->set('training_amount', $training_amount);
@@ -4579,7 +4601,8 @@ class LoginController extends AppPluginController{
         $Partially = new \SpaLiveV1\Controller\PartiallyController();
         $Partially->initialize();
         $deferred_offer_id = isset($Partially->deferred_offers['elite']) && !empty($Partially->deferred_offers['elite']) ? $Partially->deferred_offers['elite'] : null;
-        $this->set('installments_deferred', !empty($deferred_offer_id) ? true : false);
+        $installments_deferred = !empty($deferred_offer_id);
+        $this->setCourseInstallmentsFlags($installments_deferred, $this->installmentsExternalShopUrl($installments_deferred));
 
         $this->set('title_option', 'ToxTune-Up Sessions $' . $this->level_1_1/100);
         $this->set('total', $this->level_1_1/100);
@@ -4855,12 +4878,19 @@ class LoginController extends AppPluginController{
                 'State' => ['table' => 'cat_states', 'type' => 'INNER', 'conditions' => 'State.id = CatTrainigs.state_id']
             ];
 
-            $_where = ['CatTrainigs.scheduled >' => $now, 'CatTrainigs.deleted' => 0, 'CatTrainigs.deleted' => 0, 'CatTrainigs.level' => 'LEVEL 3 FILLERS', 'CatTrainigs.mint <> 1','CatTrainigs.state_id' => USER_STATE];
+            $_where = [
+                'CatTrainigs.scheduled >' => $now,
+                'CatTrainigs.deleted' => 0,
+                'CatTrainigs.level IN' => ['FILLER_COURSE_LEVEL_1', 'LEVEL 3 FILLERS'],
+                'CatTrainigs.mint <>' => 1,
+                'CatTrainigs.state_id' => USER_STATE
+            ];
 
             $tr_result = array();
             $trainingsavailable  = $this->CatTrainigs->find()->select($fields)
             ->join($_join)
             ->where($_where)->order(['CatTrainigs.scheduled' => 'ASC'])->toArray();
+
             foreach ($trainingsavailable as $row) {
                 $seats = $row['available_seats'] - $row['assistants'];
                 if($seats <= 0) continue;
@@ -4878,7 +4908,7 @@ class LoginController extends AppPluginController{
             }
 
             $trainings_data[] = array(
-                'title' => 'Filler Foundations',
+                'title' => 'Filler Course Level 1',
                 'data' => $tr_result,
             );
         } else{
@@ -5291,6 +5321,8 @@ class LoginController extends AppPluginController{
                 } else{
                     if($temp_user->steps != 'HOME' /*&& $temp_user->steps != 'WAITINGSCHOOLAPPROVAL'*/){
                         $step = 'MATERIALS';
+                    } else{
+                        $step = $temp_user->steps;
                     }
 
                     $userEntity->steps = $step;
@@ -5639,15 +5671,20 @@ class LoginController extends AppPluginController{
             return;
         }
         
+        // Same levels/payment types as CourseController::validateBasicTraining — hybrid counts as basic course equivalent.
+        $hybrid_basic_equivalent_levels = ['MYSPALIVES_HYBRID_TOX_FILLER_COURSE', 'MYSPALIVE_S_HYBRID_TOX_FILLER_COURSE'];
+        $basic_course_payment_types = array_merge(['BASIC COURSE', 'CI REGISTER'], $hybrid_basic_equivalent_levels);
+        $basic_training_levels = array_merge(['LEVEL 1'], $hybrid_basic_equivalent_levels);
+
         $ent_payments_basic = $this->DataPayment->find()->select(['DataPayment.id', 'Refund.id','DataPayment.total','DataPayment.uid','DataPayment.refund_id'])
         ->join([
             'Refund' => ['table' => 'data_payment', 'type' => 'LEFT', 'conditions' => 'Refund.uid = DataPayment.uid AND Refund.type = "REFUND" AND Refund.total = DataPayment.total'],
         ])
-        ->where(['DataPayment.id_from' => USER_ID, 'DataPayment.type IN' => array('BASIC COURSE', 'CI REGISTER'), 'DataPayment.payment <>' => ''])->last();
+        ->where(['DataPayment.id_from' => USER_ID, 'DataPayment.type IN' => $basic_course_payment_types, 'DataPayment.payment <>' => ''])->last();
         
         $user_training = $this->DataTrainings->find()->select(['CatTrainigs.scheduled', 'CatTrainigs.created', 'DataTrainings.attended'])->join([
             'CatTrainigs' => ['table' => 'cat_trainings', 'type' => 'INNER', 'conditions' => 'CatTrainigs.id = DataTrainings.training_id'],
-            ])->where(['CatTrainigs.level' => 'LEVEL 1','DataTrainings.user_id' => USER_ID,'DataTrainings.deleted' => 0])->first();
+            ])->where(['CatTrainigs.level IN' => $basic_training_levels,'DataTrainings.user_id' => USER_ID,'DataTrainings.deleted' => 0])->first();
 
             
         $entCertificate = $this->DataCertificates->find()
@@ -5717,7 +5754,7 @@ class LoginController extends AppPluginController{
                     $this->success();
                     $this->set('step', 'BASICCOURSE');
                     return;
-                }else if ($twice_pay_refund->type == 'BASIC COURSE' && $twice_pay_refund->refund_id  == 0 && empty($user_training)){
+                }else if (in_array($twice_pay_refund->type, $basic_course_payment_types, true) && $twice_pay_refund->refund_id  == 0 && empty($user_training)){
                     $this->success();
                     $this->set('step', 'BASICCOURSE');
                     return;
@@ -6622,18 +6659,20 @@ class LoginController extends AppPluginController{
             );
         }
 
-        $string_prices = get('services','');
-        $string_prices_names = get('services_name','');
-        
-        $arr_prices = explode('|', $string_prices);
-        $arr_prices_names = explode('|', $string_prices_names);
+        $string_prices = get('services', '');
+        $string_prices_names = get('services_name', '');
 
-        $has_names = empty($arr_prices_names);
-        if ($model == "injector" && empty($arr_prices)) {
+        $arr_prices = array_values(array_filter(array_map('trim', explode('|', (string)$string_prices)), static function ($chunk) {
+            return $chunk !== '';
+        }));
+        $arr_prices_names = array_values(array_filter(array_map('trim', explode('|', (string)$string_prices_names)), static function ($chunk) {
+            return $chunk !== '';
+        }));
+
+        if ($model === 'injector' && count($arr_prices) === 0) {
             $this->message('Invalid services string format.');
             return;
         }
-        
 
         $array_save = array(
                 'id' => USER_ID,
@@ -6717,6 +6756,23 @@ class LoginController extends AppPluginController{
             $this->loadModel('SpaLiveV1.DataTreatmentsPrice');
             $servicesPriceEligibility = new ServicesHelper(USER_ID);
 
+            $saveable_price_rows = [];
+            foreach ($arr_prices as $index => $row) {
+                $arr_inter = array_map('trim', explode(',', $row));
+                if (count($arr_inter) < 2 || $arr_inter[0] === '' || $arr_inter[1] === '') {
+                    continue;
+                }
+                if (!$servicesPriceEligibility->injector_may_set_price_for_ci_treatment((int)$arr_inter[0])) {
+                    continue;
+                }
+                $saveable_price_rows[] = ['index' => $index, 'inter' => $arr_inter];
+            }
+
+            if (count($arr_prices) > 0 && count($saveable_price_rows) === 0) {
+                $this->message('No service prices could be saved. Check id,price format, or complete the required subscription step for those treatments.');
+                return;
+            }
+
             if (count($arr_prices) > 0) {
                 $str_query_delete = "
                     UPDATE data_treatments_prices SET deleted = 1 WHERE user_id = " . USER_ID;
@@ -6725,17 +6781,15 @@ class LoginController extends AppPluginController{
 
             $services_array = array();
 
-            foreach ($arr_prices as $index => $row) {
-                // services: id,price|id,price
-                $arr_inter = explode(",", $row);
-            
-               
-            
-                if (!empty($arr_inter[0]) && !$servicesPriceEligibility->injector_may_set_price_for_ci_treatment((int)$arr_inter[0])) {
-                    continue;
-                }
+            foreach ($saveable_price_rows as $saveable) {
+                $index = $saveable['index'];
+                $arr_inter = $saveable['inter'];
 
-                $p_entity = $this->DataTreatmentsPrice->find()->where(['DataTreatmentsPrice.treatment_id' => $arr_inter[0], 'DataTreatmentsPrice.user_id' => USER_ID])->first();
+                $p_entity = $this->DataTreatmentsPrice->find()->where([
+                    'DataTreatmentsPrice.treatment_id' => $arr_inter[0],
+                    'DataTreatmentsPrice.user_id' => USER_ID,
+                    'DataTreatmentsPrice.deleted' => 0,
+                ])->first();
             
                 if (!empty($p_entity)) {
                     $p_id = $p_entity->id;
@@ -6758,30 +6812,28 @@ class LoginController extends AppPluginController{
                     }
                 }
 
-                if($service_name == ''){
-                    if(!empty($p_entity['alias'])){
-                        $service_name = $p_entity['alias'];
-
-                    }
+                if ($service_name === '' && $p_entity !== null && !empty($p_entity->alias)) {
+                    $service_name = $p_entity->alias;
                 }
 
             
-                if(!empty($arr_inter[0]) && !empty($arr_inter[1])){
-                    $arr_save_q = [
-                        'id' => $p_id,
-                        'user_id' => USER_ID,
-                        'treatment_id' => $arr_inter[0],
-                        'price' => $arr_inter[1],
-                        'alias' => $service_name, // Agregar el nombre del servicio aquí
-                        'deleted' => 0,
-                    ];
-            
-                    $cq_entity = $this->DataTreatmentsPrice->newEntity($arr_save_q);
-                    if (!$cq_entity->hasErrors()) {
-                        $this->DataTreatmentsPrice->save($cq_entity);
-                    }
-
+                $arr_save_q = [
+                    'user_id' => USER_ID,
+                    'treatment_id' => $arr_inter[0],
+                    'price' => $arr_inter[1],
+                    'alias' => $service_name,
+                    'deleted' => 0,
+                    'createdby' => USER_ID,
+                ];
+                if (!empty($p_id)) {
+                    $arr_save_q['id'] = $p_id;
                 }
+
+                $cq_entity = $this->DataTreatmentsPrice->newEntity($arr_save_q);
+                if (!$cq_entity->hasErrors()) {
+                    $this->DataTreatmentsPrice->save($cq_entity);
+                }
+
             }
 
             // $this->loadModel('SpaLiveV1.DataTreatment');
@@ -6903,7 +6955,11 @@ class LoginController extends AppPluginController{
         
         $FC = new FillersController();
         $has_filler_certificate = $FC->has_fillers_certificate(USER_ID);
+        $fillers_ci_restricted = $has_filler_certificate && $FC->fillersCiAccessIsRestricted(USER_ID);
         $body_areas = $FC->get_body_areas_fillers();
+        if ($fillers_ci_restricted) {
+            $body_areas = $FC->filterBodyAreasFillersToLipsOnly($body_areas);
+        }
         $areas_injector = array();
 
         // other courses validate
@@ -6942,15 +6998,16 @@ class LoginController extends AppPluginController{
                 'StateAvailability' => ['table' => 'data_treatments_enabled_by_state', 'type' => 'LEFT', 'conditions' => 'StateAvailability.treatment_id = CatCITreatments.id'],
             ])->all();
 
-            if(!empty($ent_treatments)){
-                foreach ($ent_treatments as $row) {     
+            $filler_ci_rows = [];
+            if (!empty($ent_treatments)) {
+                foreach ($ent_treatments as $row) {
                     $ent_treatments_price = $this->DataTreatmentsPrice->find()
                     ->where(['DataTreatmentsPrice.deleted' => 0,
                             'DataTreatmentsPrice.user_id' => USER_ID,
                              'DataTreatmentsPrice.treatment_id' => $row['id'],
                     ])->first();
 
-                    if(!empty($ent_treatments_price['alias'])){
+                    if (!empty($ent_treatments_price['alias'])) {
                         $row['name'] = $ent_treatments_price['alias'];
                     }
 
@@ -6961,7 +7018,7 @@ class LoginController extends AppPluginController{
                         $aux_description = $row['description'];
 
                         $aux_description = strtolower(trim($aux_description));
-                        
+
                         $description = $row['description'];
 
                         if (strpos($aux_description, "detail") !== false) {
@@ -6987,9 +7044,15 @@ class LoginController extends AppPluginController{
                         $t_array['qty'] = $row['qty'];
                         $t_array['ci_comission'] = intval($row['Product']['comission_spalive']);
                     }
-                    
-                    $result[] = $t_array;
+
+                    $filler_ci_rows[] = $t_array;
                 }
+            }
+            if ($fillers_ci_restricted) {
+                $filler_ci_rows = $FC->filterFillersCiTreatmentsForLevel1Course($filler_ci_rows);
+            }
+            foreach ($filler_ci_rows as $t_array) {
+                $result[] = $t_array;
             }
 
             $areas_injector_arr = $FC->get_body_areas_injector(USER_ID);            
@@ -7286,6 +7349,7 @@ class LoginController extends AppPluginController{
         }        
 
         $this->set('body_areas', $body_areas);
+        $this->set('fillers_ci_restricted', $fillers_ci_restricted);
         $this->set('data', $validated_result);
         $this->success();
     }

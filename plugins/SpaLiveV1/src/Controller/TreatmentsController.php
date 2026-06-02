@@ -39,6 +39,44 @@ class TreatmentsController extends AppPluginController{
         return $this->mailgunKey;
     }
 
+    private function treatmentStringContainsFillers(string $stringTreatments): bool
+    {
+        $rawIds = array_filter(array_map('trim', explode(',', $stringTreatments)), static fn ($id) => $id !== '');
+        $treatmentIds = array_values(array_filter(array_map('intval', $rawIds), static fn ($id) => $id > 0));
+        if ($treatmentIds === []) {
+            return false;
+        }
+
+        $this->loadModel('SpaLiveV1.CatTreatmentsCi');
+        $match = $this->CatTreatmentsCi->find()
+            ->select(['CatTreatmentsCi.id'])
+            ->join([
+                'Category' => [
+                    'table' => 'cat_treatments_category',
+                    'type' => 'INNER',
+                    'conditions' => 'Category.id = CatTreatmentsCi.category_treatment_id',
+                ],
+            ])
+            ->where([
+                'CatTreatmentsCi.id IN' => $treatmentIds,
+                'CatTreatmentsCi.deleted' => 0,
+                'Category.type' => 'FILLERS',
+            ])
+            ->first();
+
+        return !empty($match);
+    }
+
+    private function resolveAssignedDoctorByTreatments(int $assistanceId, string $stringTreatments): int
+    {
+        $isFillersTreatment = $this->treatmentStringContainsFillers($stringTreatments);
+        if ($isFillersTreatment) {
+            return $this->SysUserAdmin->getAssignedDoctorForContext($assistanceId, ['isFillers' => true]);
+        }
+
+        return $this->SysUserAdmin->getRandomDoctor($assistanceId);
+    }
+
 	public function initialize() : void{
         parent::initialize();
         date_default_timezone_set("America/Chicago");
@@ -443,7 +481,7 @@ class TreatmentsController extends AppPluginController{
         }
 
         //$assigned_doctor = rand(0,1) == 0 ? 'Dr Zach Cannon' : 'Dr Doohi Lee';
-        $assigned_doctor = $this->SysUserAdmin->getRandomDoctor($assistance_id);
+        $assigned_doctor = $this->resolveAssignedDoctorByTreatments((int)$assistance_id, (string)$string_treatments);
         
 
         if (empty($schedule_date)) 
@@ -765,7 +803,7 @@ class TreatmentsController extends AppPluginController{
         #endregion  
 
         //$assigned_doctor = rand(0,1) == 0 ? 'Dr Zach Cannon' : 'Dr Doohi Lee';
-        $assigned_doctor = $this->SysUserAdmin->getRandomDoctor($assistance_id);
+        $assigned_doctor = $this->resolveAssignedDoctorByTreatments((int)$assistance_id, (string)$string_treatments);
         
 
         if (empty($schedule_date)) 
@@ -952,7 +990,7 @@ class TreatmentsController extends AppPluginController{
         if(empty($entity)){
 
             //$assigned_doctor = rand(0,1) == 0 ? 'Dr Zach Cannon' : 'Dr Doohi Lee';
-            $assigned_doctor = $this->SysUserAdmin->getRandomDoctor($assistance_id);
+            $assigned_doctor = $this->resolveAssignedDoctorByTreatments((int)$assistance_id, (string)$string_treatments);
             
             $array_save = array(
                 'uid' => $treatment_uid,
@@ -1738,7 +1776,6 @@ class TreatmentsController extends AppPluginController{
         $this->loadModel('SpaLiveV1.CatTrainings');
 
         $token = get('token',"");
-
         if(!empty($token)){
             $user = $this->AppToken->validateToken($token, true);
             if($user === false){
@@ -1762,6 +1799,8 @@ class TreatmentsController extends AppPluginController{
         ])
         ->where(['DataTrainings.user_id' => USER_ID, 'DataTrainings.deleted' => 0, 'CatTrainings.deleted' => 0])
         ->all();
+
+        $this->set('user_trainings', $user_trainings);
         
         $courses_id = [];
         if(count($user_trainings) > 0){
@@ -1792,7 +1831,47 @@ class TreatmentsController extends AppPluginController{
                 $courses_id = array_values(array_unique($courses_id, SORT_NUMERIC));
             }
         }
-        // Busqueda de cursos        
+        // Busqueda de cursos
+
+        // Pacientes en tratamiento activo sin curso/training (ej. otras escuelas).
+        if (strtoupper($user['user_role']) != 'examiner') {
+            $this->loadModel('SpaLiveV1.DataTreatment');
+            $activeTreatments = $this->DataTreatment->find()
+                ->select([
+                    'DataTreatment.treatments',
+                    'treatments_string' => "(SELECT GROUP_CONCAT(CONCAT(CTC.name,' (',CT.name, ')') SEPARATOR ', ')
+                        FROM cat_treatments_ci CT
+                        JOIN cat_treatments_category CTC ON CTC.id = CT.category_treatment_id
+                        WHERE FIND_IN_SET(CT.id, DataTreatment.treatments))",
+                ])
+                ->where([
+                    'DataTreatment.patient_id' => USER_ID,
+                    'DataTreatment.status IN' => ['PETITION', 'REQUEST', 'CONFIRM'],
+                    'DataTreatment.deleted' => 0,
+                ])
+                ->all();
+
+            foreach ($activeTreatments as $activeTreatment) {
+                if (empty($activeTreatment->treatments_string)) {
+                    continue;
+                }
+                $separate_treatments = $this->separate_treatments($activeTreatment->treatments_string);
+                if (!empty($separate_treatments['neurotoxins']) || !empty($separate_treatments['fillers'])) {
+                    if (!in_array(92, $courses_id, true)) {
+                        $courses_id[] = 92;
+                    }
+                }
+                if (!empty($separate_treatments['iv_therapy']) && defined('USER_STATE') && USER_STATE == 10) {
+                    if (!in_array(35, $courses_id, true)) {
+                        $courses_id[] = 35;
+                    }
+                }
+            }
+
+            if (count($courses_id) > 0) {
+                $courses_id = array_values(array_unique($courses_id, SORT_NUMERIC));
+            }
+        }
         
         $fields = ['DataConsultation.uid','DataConsultation.payment','DataConsultation.schedule_date','DataCertificates.uid','DataCertificates.date_start','DataCertificates.date_expiration', 'DataCertificates.certificate_url', 'treatments_id' => 'DataConsultation.treatments'];
         $fields['assistance'] = "(SELECT UP.name FROM sys_users UP WHERE UP.id = DataConsultation.assistance_id)";
@@ -1884,15 +1963,20 @@ class TreatmentsController extends AppPluginController{
             return false;
         }
 
+        $this->set('courses_id', $courses_id);
+
         if(count($courses_id) > 0){
             foreach($courses_id as $course_id){
                 // Saltar si ya existe
                 if (hasTreatmentInList($list_gfe_requires, $course_id)) {
                     continue;
                 }
-                $ot = $course_id == 92 || $course_id == 93 ? false : true;
+                $ot = !in_array($course_id, [92, 93, 35], true);
                 $title = '';
-                if($ot){
+                if($course_id == 35){
+                    $title = 'IV Therapy';
+                    $cat_course_type_id = 35;
+                }else if($ot){
                     $course_type = $this->CatTrainings->find()
                     ->select(['CatCoursesType.title', 'CatCoursesType.id'])
                     ->join([
@@ -1906,6 +1990,7 @@ class TreatmentsController extends AppPluginController{
                     $title = 'Botox & other neurotoxins,Fillers & Hylenex';
                     $cat_course_type_id = $course_id;
                 }
+                $gfe_treatment_ids = $course_id == 35 ? '35' : '92,93';
                 $fields = ['DataConsultation.uid','DataConsultation.payment','DataConsultation.schedule_date','DataCertificates.uid','DataCertificates.date_start','DataCertificates.date_expiration', 'DataCertificates.certificate_url', 'DataConsultation.treatments'];
                 $fields['expirate_soon'] = "(IF(DATEDIFF(NOW(), DataCertificates.date_expiration) < 30,1,0))";
 
@@ -1931,6 +2016,8 @@ class TreatmentsController extends AppPluginController{
                 ])
                 ->where($_where)->last();
 
+                $this->set('gfes', $gfes);
+
                 if(empty($gfes)){
                     $list_gfe_requires[] = [
                         'course_id' => $course_id,
@@ -1938,7 +2025,7 @@ class TreatmentsController extends AppPluginController{
                         'button_text' => 'Get my GFE',
                         'status_gfe' => '',
                         'ot' => $ot,
-                        'treatments' => $ot ? $cat_course_type_id : '92,93',
+                        'treatments' => $ot ? (string)$cat_course_type_id : $gfe_treatment_ids,
                     ];
                 }else{
                     $current_date_validation = date('Y-m-d');
@@ -1953,6 +2040,8 @@ class TreatmentsController extends AppPluginController{
                         $expires_soon = false;
                         $expired = false;
                     }
+
+                    $this->set('expired', $expired);
 
                     if($expired != true){
                         if($expires_soon == true){
@@ -1974,7 +2063,7 @@ class TreatmentsController extends AppPluginController{
                                     'ot' => $ot,
                                     'treatments' => $gfes['treatments'],
                                 ];
-                            }else if($gfes['date_expiration'] >= $current_date_validation){
+                            }else if(!empty($gfes['DataCertificates']['date_expiration']) && $gfes['DataCertificates']['date_expiration'] >= $current_date_validation){
                                 
                                 $diference_in_seconds = strtotime($gfes['DataCertificates']['date_expiration']) - strtotime($current_date_validation);
                                 
@@ -3991,7 +4080,7 @@ class TreatmentsController extends AppPluginController{
         $treatment_uid = Text::uuid();
         
         //$assigned_doctor = rand(0,1) == 0 ? 'Dr Zach Cannon' : 'Dr Doohi Lee';
-        $assigned_doctor = $this->SysUserAdmin->getRandomDoctor($assistance_id);
+        $assigned_doctor = $this->resolveAssignedDoctorByTreatments((int)$assistance_id, (string)$string_treatments);
         
 
         if (empty($schedule_date)) 
@@ -6551,8 +6640,16 @@ class TreatmentsController extends AppPluginController{
             }
 
             if(isset($array_treatments['fillers'])){
-                $where = ['user_id' => $value['id'], 'status' => 'ACTIVE', 'deleted' => 0, 'subscription_type LIKE' => '%MD%'];
-                $where['OR'] = [['main_service' => 'FILLERS'], ['addons_services LIKE' => '%FILLERS%']];
+                $where = [
+                    'user_id' => $value['id'],
+                    'status' => 'ACTIVE',
+                    'deleted' => 0,
+                    'subscription_type LIKE' => '%MD%',
+                    'OR' => [
+                        ['main_service LIKE' => '%FILLERS%'],
+                        ['addons_services LIKE' => '%FILLERS%'],
+                    ],
+                ];
                 $ent_sub = $this->DataSubscriptions->find()->where($where)->first();
 
                 if(empty($ent_sub)){
@@ -7030,8 +7127,15 @@ class TreatmentsController extends AppPluginController{
             }
 
             if(isset($array_treatments['fillers'])){
-                $where = ['user_id' => $value['id'], 'status' => 'ACTIVE', 'deleted' => 0, 'subscription_type LIKE' => '%MD%'];
-                $where['OR'] = [['main_service' => 'FILLERS'], ['addons_services LIKE' => '%FILLERS%']];
+                $where = [
+                    'user_id' => $value['id'],
+                    'status' => 'ACTIVE',
+                    'deleted' => 0,
+                    'OR' => [
+                        ['main_service LIKE' => '%FILLERS%'],
+                        ['addons_services LIKE' => '%FILLERS%'],
+                    ],
+                ];
                 $ent_sub = $this->DataSubscriptions->find()->where($where)->first();
 
                 if(empty($ent_sub)){
@@ -7261,6 +7365,32 @@ class TreatmentsController extends AppPluginController{
 
     }
 
+    /**
+     * Whether the user has an active subscription that includes FILLERS
+     * via main_service or addons_services (not subscription_type).
+     */
+    private function injectorHasFillersSubscription(int $userId): bool
+    {
+        if ($userId <= 0) {
+            return false;
+        }
+        $this->loadModel('SpaLiveV1.DataSubscriptions');
+        $row = $this->DataSubscriptions->find()
+            ->select(['DataSubscriptions.id'])
+            ->where([
+                'DataSubscriptions.user_id' => $userId,
+                'DataSubscriptions.deleted' => 0,
+                'DataSubscriptions.status' => 'ACTIVE',
+                'OR' => [
+                    ['DataSubscriptions.main_service LIKE' => '%FILLERS%'],
+                    ['DataSubscriptions.addons_services LIKE' => '%FILLERS%'],
+                ],
+            ])
+            ->first();
+
+        return !empty($row);
+    }
+
     public function save_treatment(){
         $this->loadModel('SpaLiveV1.DataTreatment');
         $this->loadModel('SpaLiveV1.DataConsultationAnswers');
@@ -7331,14 +7461,13 @@ class TreatmentsController extends AppPluginController{
                 'Cat' => ['table' => 'cat_treatments_category', 'type' => 'INNER', 'conditions' => 'Cat.id = CatCITreatments.category_treatment_id'],
             ])
             ->where(['CatCITreatments.id IN' => explode(',', $string_treatments)])->all();
-
-            $array_list = array();
             
+            $array_list = array();
+            $injectorHasFillersSub = $this->injectorHasFillersSubscription((int)$assistance_id);
+
             foreach ($ent_treatments as $key => $value) {
                 if($value['Cat']['type'] == 'FILLERS'){
-                    $this->loadModel('SpaLiveV1.DataSubscriptions');
-                    $ent_sub = $this->DataSubscriptions->find()->where(['user_id' => $assistance_id, 'deleted' => 0, 'status' => 'ACTIVE', 'subscription_type LIKE' => '%MD%'])->first();
-                    if(strpos($ent_sub->subscription_type, 'FILLERS') !== false){
+                    if ($injectorHasFillersSub) {
                         $array_list[] = $value->id;
                     }
                 }else{
@@ -7347,9 +7476,13 @@ class TreatmentsController extends AppPluginController{
             }
 
             $string_treatments = implode(',', $array_list);
+            if ($string_treatments === '') {
+                $this->message('Treatments empty or not permitted for this injector.');
+                return;
+            }
         }
 
-        $assigned_doctor = $this->SysUserAdmin->getRandomDoctor($assistance_id);        
+        $assigned_doctor = $this->resolveAssignedDoctorByTreatments((int)$assistance_id, (string)$string_treatments);        
 
         $created = date('Y-m-d H:i:s');
         $array_save = array(
@@ -7379,8 +7512,9 @@ class TreatmentsController extends AppPluginController{
 
         $this->loadModel('SpaLiveV1.CatStates');
         $obj_state = $this->CatStates->find()->select(['CatStates.name'])->where(['CatStates.id' => USER_STATE])->first();
-                    
-        $chain =  $user['street'] . ' ' . $user['city'] . ' ' . $user['zip'] . ' ,' . $obj_state->name;
+        $stateName = !empty($obj_state) ? $obj_state->name : '';
+
+        $chain =  $user['street'] . ' ' . $user['city'] . ' ' . $user['zip'] . ' ,' . $stateName;
 
         $coordinates = $Main->validate_coordinates($chain, $user['zip']);
         $array_save['latitude']   = $coordinates['latitude'];
@@ -7389,12 +7523,16 @@ class TreatmentsController extends AppPluginController{
         //******
 
         $c_entity = $this->DataTreatment->newEntity($array_save);
-        if(!$c_entity->hasErrors()) {
-            if ($this->DataTreatment->save($c_entity)) {
-                $this->set('treatment_uid', $treatment_uid);
-                $this->success();
-            }
+        if ($c_entity->hasErrors()) {
+            $this->message('Validation failed.');
+            return;
         }
+        if ($this->DataTreatment->save($c_entity)) {
+            $this->set('treatment_uid', $treatment_uid);
+            $this->success();
+            return;
+        }
+        $this->message('Could not save treatment.');
     }
 
     public function update_treatment(){
@@ -7427,6 +7565,10 @@ class TreatmentsController extends AppPluginController{
         }
 
         $ent_treatment = $this->DataTreatment->find()->where(['uid' => $treatment_uid])->first();
+        if (empty($ent_treatment)) {
+            $this->message('Treatment not found.');
+            return;
+        }
 
         $injector_id = get('injector_id', 0);
 
@@ -7440,7 +7582,7 @@ class TreatmentsController extends AppPluginController{
             return;
         }*/
 
-        if($injector_id > 0){
+        if($injector_id > 0 && $string_treatments !== ''){
             $this->loadModel('SpaLiveV1.CatCITreatments'); 
             $ent_treatments = $this->CatCITreatments->find()->select(['CatCITreatments.id','CatCITreatments.name','CatCITreatments.details', 'CatCITreatments.std_price', 'Cat.name', 'Cat.type', 'CatCITreatments.category_treatment_id'])
             ->join([
@@ -7449,12 +7591,11 @@ class TreatmentsController extends AppPluginController{
             ->where(['CatCITreatments.id IN' => explode(',', $string_treatments)])->all();
 
             $array_list = array();
-            
+            $injectorHasFillersSub = $this->injectorHasFillersSubscription((int)$injector_id);
+
             foreach ($ent_treatments as $key => $value) {
                 if($value['Cat']['type'] == 'FILLERS'){
-                    $this->loadModel('SpaLiveV1.DataSubscriptions');
-                    $ent_sub = $this->DataSubscriptions->find()->where(['user_id' => $injector_id, 'deleted' => 0, 'status' => 'ACTIVE', 'subscription_type LIKE' => '%MD%'])->first();
-                    if(strpos($ent_sub->subscription_type, 'FILLERS') !== false){
+                    if ($injectorHasFillersSub) {
                         $array_list[] = $value->id;
                     }
                 }else{
@@ -7463,6 +7604,10 @@ class TreatmentsController extends AppPluginController{
             }
 
             $string_treatments = implode(',', $array_list);
+            if ($string_treatments === '') {
+                $this->message('Treatments empty or not permitted for this injector.');
+                return;
+            }
         }
 
         $schedule_date = get('schedule_date','');
