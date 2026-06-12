@@ -2363,9 +2363,8 @@ class CourseController extends AppPluginController {
                                         ->where($_where)
                                         ->first();
 
-        // Obtener niveles dinámicos disponibles
         $dynamic_levels = $this->CatCoursesType->find()
-            ->where(['CatCoursesType.deleted' => 0, 'CatCoursesType.available' => 1])
+            ->where(['CatCoursesType.deleted' => 0])
             ->all();
 
         // Buscar entrenamientos dinámicos del usuario
@@ -3173,6 +3172,9 @@ class CourseController extends AppPluginController {
             $__fields = ['CatTrainigs.id', 'CatTrainigs.created','CatTrainigs.title', 'CatTrainigs.scheduled', 'CatTrainigs.neurotoxins', 'CatTrainigs.fillers', 'CatTrainigs.materials', 'CatTrainigs.available_seats', 'CatTrainigs.level','State.name','State.abv','CatTrainigs.address','CatTrainigs.zip','CatTrainigs.city', 'data_training_id' => 'DataTrainigs.id','DataPayment.id','CourseType.require_msl_basic'];
             
             foreach($dynamic_levels as $dynamic_level) {
+                if ((int)$dynamic_level->available !== 1) {
+                    continue;
+                }
                 if (in_array($dynamic_level->name_key,$added_cats)) continue;
                 
                 $_where_dynamic_ = [
